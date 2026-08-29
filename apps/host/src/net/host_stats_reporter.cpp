@@ -1,7 +1,5 @@
 #include "net/host_stats_reporter.h"
 
-#include <windows.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +13,10 @@
 #include "input/input_dispatcher.h"
 #include "net/peer_session.h"
 #include "util/log.h"
+
+#ifdef GLSPLAY_HAVE_NVML
+#include <nvml.h>
+#endif
 
 namespace glsplay {
 namespace {
@@ -32,62 +34,37 @@ std::string Fixed(double value, int digits = 2) {
   return buffer;
 }
 
-// NVML, loaded from the driver's nvml.dll at runtime - no SDK header or import
-// library needed (the CUDA toolkit is not on the VM). Only the five entry
-// points and two structs we use are declared here.
+#ifdef GLSPLAY_HAVE_NVML
 class NvmlProbe {
-  using Device = void*;
-  struct Util {
-    unsigned int gpu;
-    unsigned int memory;
-  };
-  using InitFn = int(__cdecl*)();
-  using ShutdownFn = int(__cdecl*)();
-  using HandleFn = int(__cdecl*)(unsigned int, Device*);
-  using UtilFn = int(__cdecl*)(Device, Util*);
-  using EncUtilFn = int(__cdecl*)(Device, unsigned int*, unsigned int*);
-
  public:
   NvmlProbe() {
-    dll_ = LoadLibraryW(L"nvml.dll");
-    if (!dll_) return;
-    auto init = reinterpret_cast<InitFn>(GetProcAddress(dll_, "nvmlInit_v2"));
-    shutdown_ = reinterpret_cast<ShutdownFn>(GetProcAddress(dll_, "nvmlShutdown"));
-    auto handle = reinterpret_cast<HandleFn>(
-        GetProcAddress(dll_, "nvmlDeviceGetHandleByIndex_v2"));
-    util_ = reinterpret_cast<UtilFn>(
-        GetProcAddress(dll_, "nvmlDeviceGetUtilizationRates"));
-    enc_util_ = reinterpret_cast<EncUtilFn>(
-        GetProcAddress(dll_, "nvmlDeviceGetEncoderUtilization"));
-    if (!init || !handle || !util_) return;
-    if (init() != 0 || handle(0, &device_) != 0) return;
+    if (nvmlInit_v2() != NVML_SUCCESS) return;
+    if (nvmlDeviceGetHandleByIndex_v2(0, &device_) != NVML_SUCCESS) return;
     ready_ = true;
-    LOG_INFO << "NVML: GPU / encoder utilisation telemetry enabled";
   }
-
   ~NvmlProbe() {
-    if (ready_ && shutdown_) shutdown_();
-    if (dll_) FreeLibrary(dll_);
+    if (ready_) nvmlShutdown();
   }
 
   void Sample(double* gpu_percent, double* encoder_percent) {
     if (!ready_) return;
-    Util u{};
-    if (util_(device_, &u) == 0) *gpu_percent = u.gpu;
-    unsigned int enc = 0, sampling_us = 0;
-    if (enc_util_ && enc_util_(device_, &enc, &sampling_us) == 0) {
-      *encoder_percent = enc;
+    nvmlUtilization_t util{};
+    if (nvmlDeviceGetUtilizationRates(device_, &util) == NVML_SUCCESS) {
+      *gpu_percent = util.gpu;
+    }
+    unsigned int encoder_util = 0;
+    unsigned int sampling_us = 0;
+    if (nvmlDeviceGetEncoderUtilization(device_, &encoder_util, &sampling_us) ==
+        NVML_SUCCESS) {
+      *encoder_percent = encoder_util;
     }
   }
 
  private:
-  HMODULE dll_ = nullptr;
-  ShutdownFn shutdown_ = nullptr;
-  UtilFn util_ = nullptr;
-  EncUtilFn enc_util_ = nullptr;
-  Device device_ = nullptr;
+  nvmlDevice_t device_{};
   bool ready_ = false;
 };
+#endif
 
 }  // namespace
 
@@ -112,7 +89,9 @@ void HostStatsReporter::Stop() {
 }
 
 void HostStatsReporter::Run() {
+#ifdef GLSPLAY_HAVE_NVML
   NvmlProbe nvml;
+#endif
 
   // Logged locally every 10 seconds too, so a session with no browser attached
   // still leaves evidence of whether capture and encode were healthy.
@@ -141,7 +120,9 @@ void HostStatsReporter::Run() {
 
     double gpu_percent = 0.0;
     double encoder_percent = 0.0;
+#ifdef GLSPLAY_HAVE_NVML
     nvml.Sample(&gpu_percent, &encoder_percent);
+#endif
 
     std::string message = "{\"type\":\"host-stats\"";
     message += ",\"t\":" + std::to_string(NowMillis());
