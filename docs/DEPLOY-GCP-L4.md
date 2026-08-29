@@ -243,6 +243,7 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 | `glsplay-web` | At startup | SYSTEM | same for `@glsplay/web` |
 | `glsplay-host` | *(none — on demand)* | `maranmani_t99` | `powershell -File C:\glsplay\run-host.ps1` |
 | `glsplay-reclaim` | **Session RemoteDisconnect** | SYSTEM | `powershell -File C:\glsplay\vdd\reclaim-console.ps1` |
+| `glsplay-display` | **Session ConsoleConnect** | `maranmani_t99` | `powershell -File C:\glsplay\vdd\set-vdd-res.ps1` → `C:\glsplay\set-vdd-res.log` |
 
 **Flow when you disconnect RDP:**
 
@@ -250,14 +251,18 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 RDP disconnect
   → glsplay-reclaim (SYSTEM)
       → reclaim-console.ps1: find user session via explorer.exe SessionId
-      → tscon <sid> /dest:console      (desktop moves to the console; MTT/L4 becomes active)
-      → wait 4s → schtasks /run /tn glsplay-host
+      → tscon <sid> /dest:console      (session moves to console -> fires ConsoleConnect)
+      │     → glsplay-display (maranmani_t99, in the console session)
+      │         → set-vdd-res.ps1: MTT display -> 1920x1080@60, primary, others detached
+      │           (must run here: EnumDisplayDevices only sees displays in the
+      │            session that owns them, which run-host.ps1's context does not)
+      → wait 12s → schtasks /run /tn glsplay-host
   → glsplay-host (maranmani_t99)
-      → run-host.ps1: set-vdd-res.ps1 -> 1920x1080@60, then launch glsplay-host.exe
+      → run-host.ps1: launch glsplay-host.exe --output 1  (MTT is DXGI output 1 on the L4)
       → C:\glsplay\host.log
 ```
 
-Logs: `C:\glsplay\reclaim-console.log`, `C:\glsplay\host.log.res`, `C:\glsplay\host.log`.
+Logs: `C:\glsplay\reclaim-console.log`, `C:\glsplay\set-vdd-res.log`, `C:\glsplay\host.log`.
 
 ---
 

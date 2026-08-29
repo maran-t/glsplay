@@ -54,12 +54,22 @@ foreach ($svc in @(
   Ok "task '$($svc.n)' at startup"
 }
 
-# --- 4. host + console-reclaim tasks ----------------------------------
-Info 'Host + console reclaim'
+# --- 4. host + console-reclaim + display tasks -----------------------
+Info 'Host + console reclaim + display'
 # host: on-demand only; reclaim-console.ps1 fires it after tscon
 New-StateTask 'glsplay-host' "$repo\run-host.ps1" $null $user
 # reclaim: SYSTEM, on RDP disconnect -> tscon session to console -> run host
 New-StateTask 'glsplay-reclaim' "$repo\vdd\reclaim-console.ps1" 4 'SYSTEM'
+# display: AS THE USER, on ConsoleConnect (which tscon produces) -> make the
+# MTT virtual display the sole primary at 1920x1080. Runs in the console
+# session's own context, the only place EnumDisplayDevices sees the displays.
+$da = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
+  "-ExecutionPolicy Bypass -Command ""& '$repo\vdd\set-vdd-res.ps1' *>&1 | " +
+  "Out-File '$repo\set-vdd-res.log' -Append -Encoding utf8""")
+$dt = New-CimInstance -CimClass (Get-CimClass MSFT_TaskSessionStateChangeTrigger root/Microsoft/Windows/TaskScheduler) -ClientOnly -Property @{ StateChange = 1 }  # ConsoleConnect
+$ds = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName 'glsplay-display' -Action $da -Trigger $dt -Settings $ds -User $user -RunLevel Highest -Force | Out-Null
+Ok "task 'glsplay-display' (runAs=$user, trigger=ConsoleConnect)"
 
 # --- 5. lock / power hardening (idempotent) ---------------------------
 Info 'Lock / power'

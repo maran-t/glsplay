@@ -17,26 +17,21 @@ param(
   [string]$SignalingUrl = 'ws://localhost:8080',
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
+  # Which DXGI output to duplicate. The MTT virtual display is output 1 on the
+  # L4 (output 0 is the L4's phantom monitor). The glsplay-display task makes
+  # MTT the primary/sole display; capturing output 1 gets the real desktop at
+  # 1920x1080. Set to '' only if you know MTT is the sole output.
+  [string]$Output = '1',
   [switch]$NoAudio = $true
 )
 
 Set-Location $RepoRoot
 
-# Make the MTT virtual display the sole, primary desktop at 1920x1080@60. After
-# a tscon the console can take a few seconds to re-attach its displays, so retry.
-# Exit 0  = MTT is now the only output  -> let the host auto-pick output 0.
-# Exit >0 = MTT not ready / still extended -> pin the host to output 1 (MTT).
-"$(Get-Date -Format o)  set-vdd-res run" | Out-File "$LogPath.res" -Encoding utf8
-$resOk = $false
-for ($try = 1; $try -le 12; $try++) {
-  $out = & powershell -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'vdd\set-vdd-res.ps1') -Width 1920 -Height 1080 -Hz 60 2>&1
-  "$(Get-Date -Format o)  attempt $try (exit $LASTEXITCODE)`n$out`n" | Out-File "$LogPath.res" -Append -Encoding utf8
-  if ($LASTEXITCODE -eq 0) { $resOk = $true; break }
-  Start-Sleep -Seconds 2
-}
-$Output = if ($resOk) { '' } else { '1' }
-"$(Get-Date -Format o)  resOk=$resOk  -> --output '$Output'" | Out-File "$LogPath.res" -Append -Encoding utf8
-Start-Sleep -Seconds 2
+# Display config (MTT primary + others detached) is done by the glsplay-display
+# task on the ConsoleConnect that reclaim-console.ps1's tscon produced - that
+# task runs in the console session where EnumDisplayDevices actually works. Here
+# we just give it a moment to have finished.
+Start-Sleep -Seconds 3
 
 $exe = Join-Path $RepoRoot 'apps\host\build\bin\Release\glsplay-host.exe'
 if (-not (Test-Path $exe)) {
