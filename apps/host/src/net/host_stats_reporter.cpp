@@ -175,14 +175,19 @@ void HostStatsReporter::Run() {
   };
 
   int elapsed_ms = 0;
+  // The cursor overlay is drawn client-side from these position updates, so it
+  // is only as smooth as this loop is fast. Poll at ~60Hz to match the video;
+  // emit_cursor() early-returns when nothing moved, so a still pointer costs
+  // nothing and a moving one sends ~120-byte position messages.
+  constexpr int kTickMs = 16;
 
   while (running_.load()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(kTickMs));
     if (!running_.load()) break;
 
     emit_cursor();
 
-    elapsed_ms += 50;
+    elapsed_ms += kTickMs;
     if (elapsed_ms < interval_ms_) continue;
     elapsed_ms = 0;
 
