@@ -11,14 +11,16 @@
 
 .EXAMPLE
   .\fetch-deps.ps1
-  .\fetch-deps.ps1 -WebrtcVersion m125.6422.3.0 -SkipViGEm
+  .\fetch-deps.ps1 -WebrtcVersion m152.7977.0.0 -SkipViGEm
 #>
 
 [CmdletBinding()]
 param(
-  # Shiguredo webrtc-build release tag. Check the releases page for the
-  # current one; the format is like m125.6422.3.0.
-  [string]$WebrtcVersion = '',
+  # Shiguredo webrtc-build release tag. This repo is built and tested against
+  # m152.7977.0.0 - the libwebrtc API drifts between releases (see
+  # docs/BUILD-HOST.md), so use this exact tag unless you are prepared to fix
+  # signature mismatches. Override to try a newer one.
+  [string]$WebrtcVersion = 'm152.7977.0.0',
   [switch]$SkipWebrtc,
   [switch]$SkipViGEm
 )

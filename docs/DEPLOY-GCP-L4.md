@@ -39,7 +39,7 @@ Every external download has its source link. Every fix we hit the hard way is in
 | MSVC | Visual Studio 2022 Build Tools, "Desktop development with C++" (v143) | <https://visualstudio.microsoft.com/downloads/> → *Build Tools for Visual Studio 2022* |
 | Windows SDK | 10.0.22621+ | VS workload |
 | Virtual display | **MTT Virtual Display Driver 25.7.23** (`MttVDD`) | see §5 |
-| libwebrtc | Shiguredo prebuilt, Windows x86_64 | <https://github.com/shiguredo-webrtc-build/webrtc-build/releases> |
+| libwebrtc | Shiguredo prebuilt, Windows x86_64, tag **`m152.7977.0.0`** (API drifts between releases - use this exact one) | <https://github.com/shiguredo-webrtc-build/webrtc-build/releases> |
 | NVENC | NVIDIA Video Codec SDK headers only (`nvEncodeAPI.h`) | <https://developer.nvidia.com/nvidia-video-codec-sdk> (dev account) |
 | ViGEmClient | optional (gamepad); not built in | <https://github.com/nefarius/ViGEmClient> |
 
