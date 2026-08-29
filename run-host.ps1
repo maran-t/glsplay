@@ -17,6 +17,12 @@ param(
   [string]$SignalingUrl = 'ws://localhost:8080',
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
+  # DXGI output to duplicate on the NVIDIA L4 adapter:
+  #   0 = the L4's own phantom head (~1280x800)
+  #   1 = the Virtual Display Driver monitor (1920x1080) <-- the one we want
+  # host.log logs "DXGI adapters: [0] NVIDIA L4 outputs=2" - if that count or
+  # ordering ever changes, revisit this.
+  [string]$Output = '1',
   [switch]$NoAudio = $true
 )
 
@@ -41,6 +47,7 @@ if (Test-Path $LogPath) {
 }
 
 $args = @('--room', $Room, '--signaling-url', $SignalingUrl, '--log-level', 'debug')
-if ($NoAudio) { $args += '--no-audio' }
+if ($NoAudio)       { $args += '--no-audio' }
+if ($Output -ne '') { $args += @('--output', $Output) }
 
 & $exe @args *> $LogPath
