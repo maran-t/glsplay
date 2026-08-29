@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+
+# host build output
+apps/host/build/
+apps/host/out/
+
+# third-party SDKs fetched under their own licence - see vm-scripts/fetch-deps.ps1
+apps/host/third_party/webrtc/
+apps/host/third_party/nvenc/
+apps/host/third_party/ViGEmClient/
+
+.env
+.env.local
+*.log
+captures/
+
+# runtime logs / downloaded blobs
+host.log*
+reclaim-console.log
+vdd/nefcon.zip
+apps/web.zip

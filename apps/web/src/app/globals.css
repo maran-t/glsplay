@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    background: theme('colors.void');
+    color: theme('colors.ink');
+    overscroll-behavior: none;
+  }
+
+  /*
+   * This page is a game viewport, not a document. Text selection during a drag
+   * would highlight UI instead of passing the drag through to the host.
+   */
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.signal');
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Digits in the HUD must not jitter horizontally as values change. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
