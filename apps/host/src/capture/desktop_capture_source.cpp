@@ -167,6 +167,8 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
       sticky_cursor_ = cursor;
       cursor_hide_frames_ = 0;
     } else if (cursor_hide_frames_ < 12) {  // ~200ms at 60fps
+      // DXGI's PointerPosition is only valid while Visible, so fall back to the
+      // last good one whole. Flaps are 1-2 frames, so this is <=33ms stale.
       ++cursor_hide_frames_;
       cursor = sticky_cursor_;
       cursor.visible = true;

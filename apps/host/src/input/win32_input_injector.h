@@ -49,6 +49,12 @@ class Win32InputInjector {
   std::atomic<int32_t> bounds_width_{0};   // 0 until SetCaptureBounds: fall
   std::atomic<int32_t> bounds_height_{0};  // back to the whole virtual desktop
 
+  // Exact intended pointer position in virtual-desktop pixels, integrated from
+  // relative deltas. Only touched on the input thread.
+  int64_t pos_x_ = 0;
+  int64_t pos_y_ = 0;
+  bool pos_primed_ = false;
+
   // Tracked so ReleaseAll knows what to lift. Guarded because input arrives on
   // the libwebrtc network thread while ReleaseAll can fire from the signaling
   // thread on disconnect.

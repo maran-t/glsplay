@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <vector>
 
 #include "glsplay_input.h"
@@ -65,11 +66,11 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
 
-  // Integrate the delta against the current pointer position and re-inject as
-  // an absolute move. MOUSEEVENTF_MOVE relative injection runs through the
-  // Windows pointer-acceleration curve, so a quick flick gets multiplied and
-  // the pointer lands in a corner. Absolute moves are never accelerated, so
-  // the client delta maps 1:1 to desktop pixels.
+  // Integrate the client delta into an exact pixel position and place the
+  // pointer there with SetCursorPos. MOUSEEVENTF_MOVE relative injection runs
+  // through the Windows pointer-acceleration curve (a flick lands in a
+  // corner); an absolute SendInput avoids that but requantises through a
+  // 0..65535 grid that eats slow sub-pixel motion. SetCursorPos does neither.
   POINT p{};
   if (!GetCursorPos(&p)) {
     INPUT fallback{};
@@ -94,27 +95,29 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
     height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
   }
 
-  const LONG nx = std::clamp<LONG>(p.x + dx, left, left + width - 1);
-  const LONG ny = std::clamp<LONG>(p.y + dy, top, top + height - 1);
-  if (nx == p.x && ny == p.y) return;
+  // Track the intended position as exact pixels. Re-deriving it from
+  // GetCursorPos each event compounds the 0..65535 requantisation error of an
+  // absolute SendInput, which is what makes slow, sub-pixel movement stutter.
+  // Seed from the OS on the first event, and resync if something else (a game,
+  // another input path) has moved the pointer out from under us.
+  if (!pos_primed_) {
+    pos_x_ = p.x;
+    pos_y_ = p.y;
+    pos_primed_ = true;
+  } else if (std::llabs(static_cast<long long>(p.x) - pos_x_) > 2 ||
+             std::llabs(static_cast<long long>(p.y) - pos_y_) > 2) {
+    pos_x_ = p.x;
+    pos_y_ = p.y;
+  }
 
-  // Re-inject as an absolute move rather than SetCursorPos: SetCursorPos does
-  // not count as "mouse activity", so Windows lets the pointer auto-hide and
-  // DXGI stops reporting it - the client's overlay then has nothing to draw.
-  // MOUSEEVENTF_VIRTUALDESK maps 0..65535 across the virtual-screen rect.
-  const LONGLONG vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-  const LONGLONG vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  const LONGLONG vw = std::max<LONGLONG>(1, GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1);
-  const LONGLONG vh = std::max<LONGLONG>(1, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1);
+  pos_x_ = std::clamp<int64_t>(pos_x_ + dx, left, left + width - 1);
+  pos_y_ = std::clamp<int64_t>(pos_y_ + dy, top, top + height - 1);
+  if (pos_x_ == p.x && pos_y_ == p.y) return;
 
-  INPUT input{};
-  input.type = INPUT_MOUSE;
-  // Round to nearest, not truncate: a 1px hand movement must map back to 1px,
-  // otherwise fine positioning shimmers between 0 and 2.
-  input.mi.dx = static_cast<LONG>(((nx - vx) * 65535 + vw / 2) / vw);
-  input.mi.dy = static_cast<LONG>(((ny - vy) * 65535 + vh / 2) / vh);
-  input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-  Send(&input, 1);
+  // SetCursorPos takes literal pixels - no 65535 grid, so a 1px move is a 1px
+  // move. The pointer is composited into the video from DXGI's reported
+  // position, which SetCursorPos still updates, so it stays visible.
+  SetCursorPos(static_cast<int>(pos_x_), static_cast<int>(pos_y_));
 }
 
 void Win32InputInjector::MouseMoveAbsolute(int16_t x, int16_t y) {
