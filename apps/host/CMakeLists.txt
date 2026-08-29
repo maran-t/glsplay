@@ -22,7 +22,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(GLSPLAY_ENABLE_VIGEM "Build the ViGEm gamepad sink (Phase 5)" ON)
-option(GLSPLAY_ENABLE_NVML  "Report GPU utilisation via NVML"        ON)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -169,17 +168,8 @@ if(GLSPLAY_ENABLE_VIGEM)
   endif()
 endif()
 
-if(GLSPLAY_ENABLE_NVML)
-  find_path(NVML_INCLUDE_DIR nvml.h
-    PATHS "$ENV{CUDA_PATH}/include" "${NVENC_ROOT}/include")
-  if(NVML_INCLUDE_DIR)
-    target_include_directories(glsplay-host PRIVATE "${NVML_INCLUDE_DIR}")
-    target_compile_definitions(glsplay-host PRIVATE GLSPLAY_HAVE_NVML=1)
-    message(STATUS "NVML headers found - GPU telemetry enabled")
-  else()
-    message(STATUS "nvml.h not found - GPU telemetry will report zeros")
-  endif()
-endif()
+# GPU / encoder utilisation is read from the driver's nvml.dll, loaded at
+# runtime in host_stats_reporter.cpp - no SDK header or import library needed.
 
 set_target_properties(glsplay-host PROPERTIES
   OUTPUT_NAME "glsplay-host"
