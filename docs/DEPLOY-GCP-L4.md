@@ -243,7 +243,6 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 | `glsplay-web` | At startup | SYSTEM | same for `@glsplay/web` |
 | `glsplay-host` | *(none — on demand)* | `maranmani_t99` | `powershell -File C:\glsplay\run-host.ps1` |
 | `glsplay-reclaim` | **Session RemoteDisconnect** | SYSTEM | `powershell -File C:\glsplay\vdd\reclaim-console.ps1` |
-| `glsplay-display` | **Session ConsoleConnect** | `maranmani_t99` | `powershell -File C:\glsplay\vdd\set-vdd-res.ps1` → `C:\glsplay\set-vdd-res.log` |
 
 **Flow when you disconnect RDP:**
 
@@ -251,18 +250,23 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 RDP disconnect
   → glsplay-reclaim (SYSTEM)
       → reclaim-console.ps1: find user session via explorer.exe SessionId
-      → tscon <sid> /dest:console      (session moves to console -> fires ConsoleConnect)
-      │     → glsplay-display (maranmani_t99, in the console session)
-      │         → set-vdd-res.ps1: MTT display -> 1920x1080@60, primary, others detached
-      │           (must run here: EnumDisplayDevices only sees displays in the
-      │            session that owns them, which run-host.ps1's context does not)
-      → wait 12s → schtasks /run /tn glsplay-host
-  → glsplay-host (maranmani_t99)
-      → run-host.ps1: launch glsplay-host.exe --output 1  (MTT is DXGI output 1 on the L4)
-      → C:\glsplay\host.log
+      → tscon <sid> /dest:console   (hands that session to the physical console;
+                                     the L4 now exposes 2 DXGI outputs —
+                                       output 0 = L4 phantom head, ~1280x800
+                                       output 1 = Virtual Display Driver, 1920x1080)
+      → wait 4s → schtasks /run /tn glsplay-host
+  → glsplay-host (maranmani_t99, now in the console session)
+      → run-host.ps1:
+          → set-vdd-res.ps1  — best-effort pin of the VDD to 1920x1080@60.
+            May log "No MTT / Virtual Display device found" when it runs from a
+            non-interactive window station; harmless — vdd_settings.xml already
+            pins the VDD to 1920x1080@60.
+          → glsplay-host.exe --output 1   (capture the Virtual Display Driver;
+            run-host.ps1 -Output '' falls back to output 0 = the phantom)
+      → C:\glsplay\host.log  (+ .prev, .res)
 ```
 
-Logs: `C:\glsplay\reclaim-console.log`, `C:\glsplay\set-vdd-res.log`, `C:\glsplay\host.log`.
+Logs: `C:\glsplay\reclaim-console.log`, `C:\glsplay\host.log` (+ `.prev`, `.res`).
 
 ---
 
@@ -365,17 +369,21 @@ Then:
    Get-Content C:\glsplay\host.log.res
    Get-Content C:\glsplay\host.log -Tail 40
    ```
-   Want: `tscon ... -> exit 0`, `ChangeDisplaySettingsEx(1920 x 1080 @ 60) -> 0`,
-   `selected NVIDIA adapter 0: NVIDIA L4`, `DXGI duplication ready ... 1920x1080`,
-   `capture started`, and the stats line's `input N ev` climbing while you move the mouse.
+   Want in `host.log`: `running in the console session`,
+   `DXGI adapters: [0] NVIDIA L4 ... outputs=2`, `selected NVIDIA adapter 0: NVIDIA L4`,
+   `DXGI duplication ready: NVIDIA L4 1920x1080`, `capture started: 1920x1080`, and the
+   stats line's `input N ev` climbing while you move the mouse. `outputs=1` and
+   `no output 1 on adapter NVIDIA L4` means the host ran while the session was still
+   on RDP, not the console — the VDD output is only visible from the console session.
 
 ### Manual host run (debugging, from the console session only)
 
 ```powershell
 $env:GLSPLAY_ROOM_SECRET = '<secret>'
 C:\glsplay\apps\host\build\bin\Release\glsplay-host.exe `
-  --room poc --signaling-url ws://localhost:8080 --log-level debug --no-audio
+  --room poc --signaling-url ws://localhost:8080 --log-level debug --no-audio --output 1
 #   flags: --secret <s> | --adapter N | --output N | --no-gamepad
+#   --output 1 = Virtual Display Driver (1920x1080); --output 0 = L4 phantom (~1280x800)
 ```
 
 ---
@@ -459,6 +467,18 @@ resolution at load.
 (self-contained `ChangeDisplaySettingsEx` P/Invoke, no modules). Must run in the
 session that owns the display — it's already wired into `run-host.ps1`, which the
 `glsplay-reclaim`→`glsplay-host` chain runs after `tscon`.
+
+### 9.9b Stream runs but is 1280x800, not 1920x1080
+**Cause:** in the console session the L4 adapter exposes **two** DXGI outputs —
+output 0 is the L4's own phantom head (~1280x800), output 1 is the Virtual Display
+Driver (1920x1080). `glsplay-host` defaults to `--output 0` and captures the
+phantom.
+**Fix:** `run-host.ps1` passes `--output 1` (via its `-Output` param, default
+`'1'`). Confirm `host.log`: `DXGI adapters: [0] NVIDIA L4 ... outputs=2` then
+`DXGI duplication ready: NVIDIA L4 1920x1080`. If instead you see `outputs=1` /
+`no output 1 on adapter NVIDIA L4`, the host ran while the session was on RDP —
+the VDD output only exists on the console session (§6). Set `-Output ''` to force
+output 0 as a fallback.
 
 ### 9.10 `tscon 2 /dest:console` → "Access is denied" (Error 5)
 **Cause:** moving another session to the console needs `SeTcbPrivilege` — an
