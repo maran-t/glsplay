@@ -98,10 +98,23 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   const LONG ny = std::clamp<LONG>(p.y + dy, top, top + height - 1);
   if (nx == p.x && ny == p.y) return;
 
-  // SetCursorPos takes literal virtual-desktop pixels, so the client delta
-  // lands exactly - no 0..65535 requantisation, which on a wide multi-monitor
-  // virtual desktop is coarse enough to make the pointer shimmer by a pixel.
-  SetCursorPos(nx, ny);
+  // Re-inject as an absolute move rather than SetCursorPos: SetCursorPos does
+  // not count as "mouse activity", so Windows lets the pointer auto-hide and
+  // DXGI stops reporting it - the client's overlay then has nothing to draw.
+  // MOUSEEVENTF_VIRTUALDESK maps 0..65535 across the virtual-screen rect.
+  const LONGLONG vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const LONGLONG vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const LONGLONG vw = std::max<LONGLONG>(1, GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1);
+  const LONGLONG vh = std::max<LONGLONG>(1, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1);
+
+  INPUT input{};
+  input.type = INPUT_MOUSE;
+  // Round to nearest, not truncate: a 1px hand movement must map back to 1px,
+  // otherwise fine positioning shimmers between 0 and 2.
+  input.mi.dx = static_cast<LONG>(((nx - vx) * 65535 + vw / 2) / vw);
+  input.mi.dy = static_cast<LONG>(((ny - vy) * 65535 + vh / 2) / vh);
+  input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+  Send(&input, 1);
 }
 
 void Win32InputInjector::MouseMoveAbsolute(int16_t x, int16_t y) {
