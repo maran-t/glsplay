@@ -17,21 +17,27 @@ param(
   [string]$SignalingUrl = 'ws://localhost:8080',
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
-  # Which DXGI output to duplicate. The MTT virtual display is output 1 on the
-  # L4 (output 0 is the L4's phantom monitor). The glsplay-display task makes
-  # MTT the primary/sole display; capturing output 1 gets the real desktop at
-  # 1920x1080. Set to '' only if you know MTT is the sole output.
-  [string]$Output = '1',
+  # DXGI output to duplicate. Leave '' (auto = output 0): set-vdd-res makes the
+  # MTT display the sole/primary output, so output 0 carries the real desktop.
+  # If set-vdd-res fails, output 0 is the L4 phantom (1280x800) - still the
+  # desktop, just low-res. Never blank. Only set this if you know better.
+  [string]$Output = '',
   [switch]$NoAudio = $true
 )
 
 Set-Location $RepoRoot
 
-# Display config (MTT primary + others detached) is done by the glsplay-display
-# task on the ConsoleConnect that reclaim-console.ps1's tscon produced - that
-# task runs in the console session where EnumDisplayDevices actually works. Here
-# we just give it a moment to have finished.
-Start-Sleep -Seconds 3
+# The glsplay-display task (ConsoleConnect trigger) does the real display config
+# in the console session. Run it again here as a fallback - the window-station
+# fix in set-vdd-res.ps1 may let it work from this context too.
+"$(Get-Date -Format o)  run-host fallback set-vdd-res" | Out-File "$LogPath.res" -Encoding utf8
+for ($try = 1; $try -le 8; $try++) {
+  $o = & powershell -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'vdd\set-vdd-res.ps1') -Width 1920 -Height 1080 -Hz 60 2>&1
+  "$(Get-Date -Format o)  attempt $try (exit $LASTEXITCODE)`n$o`n" | Out-File "$LogPath.res" -Append -Encoding utf8
+  if ($LASTEXITCODE -eq 0) { break }
+  Start-Sleep -Seconds 2
+}
+Start-Sleep -Seconds 2
 
 $exe = Join-Path $RepoRoot 'apps\host\build\bin\Release\glsplay-host.exe'
 if (-not (Test-Path $exe)) {

@@ -13,6 +13,10 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class VddRes {
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr OpenWindowStation(string name, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetProcessWindowStation(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr OpenDesktop(string name, uint flags, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool SetThreadDesktop(IntPtr h);
   [DllImport("user32.dll")] public static extern bool EnumDisplayDevices(string dev, uint num, ref DISPLAY_DEVICE d, uint flags);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool EnumDisplaySettings(string dev, int mode, ref DEVMODE dm);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int ChangeDisplaySettingsEx(string dev, ref DEVMODE dm, IntPtr hwnd, uint flags, IntPtr lp);
@@ -40,6 +44,18 @@ public class VddRes {
   }
 }
 "@
+
+# A scheduled-task process can land on a non-interactive window station, where
+# EnumDisplayDevices reports nothing attached. Force WinSta0\Default first.
+try {
+  $ws = [VddRes]::OpenWindowStation('WinSta0', $false, 0x37F)
+  if ($ws -ne [IntPtr]::Zero) {
+    [void][VddRes]::SetProcessWindowStation($ws)
+    $dt = [VddRes]::OpenDesktop('Default', 0, $false, 0x10000000)
+    if ($dt -ne [IntPtr]::Zero) { [void][VddRes]::SetThreadDesktop($dt) }
+  }
+  Write-Host "window station: WinSta0\Default attached (ws=$ws)"
+} catch { Write-Host "window station attach failed: $($_.Exception.Message)" }
 
 $DM_POSITION          = 0x00000020
 $DM_PELSWIDTH         = 0x00080000
