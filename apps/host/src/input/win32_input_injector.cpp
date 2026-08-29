@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
 #include <vector>
 
 #include "glsplay_input.h"
@@ -49,10 +48,32 @@ Win32InputInjector::Win32InputInjector(bool mouse_enabled, bool keyboard_enabled
     : mouse_enabled_(mouse_enabled), keyboard_enabled_(keyboard_enabled) {
   LOG_INFO << "input injector: mouse=" << (mouse_enabled ? "on" : "off")
            << " keyboard=" << (keyboard_enabled ? "on" : "off");
+
+  if (mouse_enabled_) {
+    // A relative SendInput passes through the pointer-acceleration curve and
+    // the speed slider, so a client delta does NOT map 1:1 - fast moves
+    // overshoot, slow ones round away. Turn both off for the session so the
+    // delta injects verbatim, and restore on shutdown.
+    if (SystemParametersInfoW(SPI_GETMOUSE, 0, saved_mouse_, 0) &&
+        SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &saved_speed_, 0)) {
+      mouse_prefs_saved_ = true;
+      int no_accel[3] = {0, 0, 0};
+      SystemParametersInfoW(SPI_SETMOUSE, 0, no_accel, 0);
+      SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
+                            reinterpret_cast<void*>(static_cast<INT_PTR>(10)), 0);
+      LOG_INFO << "mouse acceleration disabled for the session (was accel="
+               << saved_mouse_[2] << " speed=" << saved_speed_ << ')';
+    }
+  }
 }
 
 Win32InputInjector::~Win32InputInjector() {
   ReleaseAll();
+  if (mouse_prefs_saved_) {
+    SystemParametersInfoW(SPI_SETMOUSE, 0, saved_mouse_, 0);
+    SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
+                          reinterpret_cast<void*>(static_cast<INT_PTR>(saved_speed_)), 0);
+  }
 }
 
 void Win32InputInjector::SetCaptureBounds(int left, int top, int width, int height) {
@@ -66,58 +87,30 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
 
-  // Integrate the client delta into an exact pixel position and place the
-  // pointer there with SetCursorPos. MOUSEEVENTF_MOVE relative injection runs
-  // through the Windows pointer-acceleration curve (a flick lands in a
-  // corner); an absolute SendInput avoids that but requantises through a
-  // 0..65535 grid that eats slow sub-pixel motion. SetCursorPos does neither.
+  // Plain relative SendInput. With acceleration and the speed slider disabled
+  // in the constructor this is a verbatim 1:1 move, and unlike SetCursorPos it
+  // registers as real mouse activity - so Windows keeps the pointer shown and
+  // Desktop Duplication keeps reporting it, which is what the compositor draws.
+  INPUT input{};
+  input.type = INPUT_MOUSE;
+  input.mi.dx = dx;
+  input.mi.dy = dy;
+  input.mi.dwFlags = MOUSEEVENTF_MOVE;
+  Send(&input, 1);
+
+  // Relative motion has no bound of its own; nudge it back onto the captured
+  // monitor so a long sweep can't park the pointer on the L4 phantom head.
+  const int left = bounds_left_.load(std::memory_order_relaxed);
+  const int top = bounds_top_.load(std::memory_order_relaxed);
+  const int width = bounds_width_.load(std::memory_order_relaxed);
+  const int height = bounds_height_.load(std::memory_order_relaxed);
+  if (width <= 0 || height <= 0) return;
+
   POINT p{};
-  if (!GetCursorPos(&p)) {
-    INPUT fallback{};
-    fallback.type = INPUT_MOUSE;
-    fallback.mi.dx = dx;
-    fallback.mi.dy = dy;
-    fallback.mi.dwFlags = MOUSEEVENTF_MOVE;
-    Send(&fallback, 1);
-    return;
-  }
-
-  // Clamp to the captured monitor when its rect is known, otherwise to the
-  // whole virtual desktop - either way a runaway delta stays on-screen.
-  int left = bounds_left_.load(std::memory_order_relaxed);
-  int top = bounds_top_.load(std::memory_order_relaxed);
-  int width = bounds_width_.load(std::memory_order_relaxed);
-  int height = bounds_height_.load(std::memory_order_relaxed);
-  if (width <= 0 || height <= 0) {
-    left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-  }
-
-  // Track the intended position as exact pixels. Re-deriving it from
-  // GetCursorPos each event compounds the 0..65535 requantisation error of an
-  // absolute SendInput, which is what makes slow, sub-pixel movement stutter.
-  // Seed from the OS on the first event, and resync if something else (a game,
-  // another input path) has moved the pointer out from under us.
-  if (!pos_primed_) {
-    pos_x_ = p.x;
-    pos_y_ = p.y;
-    pos_primed_ = true;
-  } else if (std::llabs(static_cast<long long>(p.x) - pos_x_) > 2 ||
-             std::llabs(static_cast<long long>(p.y) - pos_y_) > 2) {
-    pos_x_ = p.x;
-    pos_y_ = p.y;
-  }
-
-  pos_x_ = std::clamp<int64_t>(pos_x_ + dx, left, left + width - 1);
-  pos_y_ = std::clamp<int64_t>(pos_y_ + dy, top, top + height - 1);
-  if (pos_x_ == p.x && pos_y_ == p.y) return;
-
-  // SetCursorPos takes literal pixels - no 65535 grid, so a 1px move is a 1px
-  // move. The pointer is composited into the video from DXGI's reported
-  // position, which SetCursorPos still updates, so it stays visible.
-  SetCursorPos(static_cast<int>(pos_x_), static_cast<int>(pos_y_));
+  if (!GetCursorPos(&p)) return;
+  const LONG cx = std::clamp<LONG>(p.x, left, left + width - 1);
+  const LONG cy = std::clamp<LONG>(p.y, top, top + height - 1);
+  if (cx != p.x || cy != p.y) SetCursorPos(cx, cy);
 }
 
 void Win32InputInjector::MouseMoveAbsolute(int16_t x, int16_t y) {

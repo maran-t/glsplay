@@ -16,10 +16,9 @@ class Win32InputInjector {
   Win32InputInjector(bool mouse_enabled, bool keyboard_enabled);
   ~Win32InputInjector();
 
-  // Rect of the monitor being captured, in virtual-desktop pixels. Relative
-  // mouse moves are integrated against the live cursor position and clamped to
-  // this, so a fast flick can never fling the pointer onto another head or off
-  // the desktop. Called once at startup, before any input arrives.
+  // Rect of the monitor being captured, in virtual-desktop pixels. After a
+  // relative move the pointer is nudged back inside this so a fast sweep can
+  // never leave it on another head. Called once at startup, before any input.
   void SetCaptureBounds(int left, int top, int width, int height);
 
   // dx and dy are raw deltas from the browser's Pointer Lock movementX/Y.
@@ -49,11 +48,12 @@ class Win32InputInjector {
   std::atomic<int32_t> bounds_width_{0};   // 0 until SetCaptureBounds: fall
   std::atomic<int32_t> bounds_height_{0};  // back to the whole virtual desktop
 
-  // Exact intended pointer position in virtual-desktop pixels, integrated from
-  // relative deltas. Only touched on the input thread.
-  int64_t pos_x_ = 0;
-  int64_t pos_y_ = 0;
-  bool pos_primed_ = false;
+  // Windows mouse settings saved at construction and restored on destruction:
+  // acceleration curve (SPI_*MOUSE, 3 ints) and pointer speed (SPI_*MOUSESPEED).
+  // Zeroed / set to 1:1 while we run so a client delta injects verbatim.
+  int saved_mouse_[3] = {0, 0, 0};
+  int saved_speed_ = 10;
+  bool mouse_prefs_saved_ = false;
 
   // Tracked so ReleaseAll knows what to lift. Guarded because input arrives on
   // the libwebrtc network thread while ReleaseAll can fire from the signaling
