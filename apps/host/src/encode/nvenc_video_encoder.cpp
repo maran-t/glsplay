@@ -31,7 +31,7 @@ int NvencVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
   // startBitrate is in kbps already. libwebrtc revises this almost immediately
   // through SetRates() once congestion control has an estimate.
   settings_.bitrate_kbps = static_cast<int>(codec_settings->startBitrate);
-  if (settings_.bitrate_kbps <= 0) settings_.bitrate_kbps = 20000;
+  if (settings_.bitrate_kbps <= 0) settings_.bitrate_kbps = 25000;
   if (settings_.fps <= 0) settings_.fps = 60;
 
   session_ = std::make_unique<NvencSession>();

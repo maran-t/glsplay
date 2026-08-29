@@ -157,10 +157,14 @@ bool NvencSession::Configure(const NvencSettings& settings) {
   preset.version = NV_ENC_PRESET_CONFIG_VER;
   preset.presetCfg.version = NV_ENC_CONFIG_VER;
 
-  // P1 is the fastest preset. PRD section 4.2 pins this: quality presets add
-  // multi-pass analysis that costs more latency than the bitrate saves.
+  // P4 (the balanced preset) with ULTRA_LOW_LATENCY tuning: single-pass, no
+  // B-frames, no lookahead, no frame reorder - every latency property of P1 is
+  // kept (see the rcParams block below), but P4's fuller motion search and mode
+  // decision spend the congestion-controlled bitrate far more efficiently, so
+  // text and edges stay sharp instead of blocky. Costs a few ms of encode time
+  // on an L4. P5-P7 would add multi-pass analysis and are not worth the latency.
   NVENC_CHECK(api_.nvEncGetEncodePresetConfigEx(
-                  encoder_, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P1_GUID,
+                  encoder_, NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P4_GUID,
                   NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY, &preset),
               "nvEncGetEncodePresetConfigEx");
 
@@ -219,7 +223,7 @@ bool NvencSession::Configure(const NvencSettings& settings) {
   std::memset(&init_params_, 0, sizeof(init_params_));
   init_params_.version = NV_ENC_INITIALIZE_PARAMS_VER;
   init_params_.encodeGUID = NV_ENC_CODEC_H264_GUID;
-  init_params_.presetGUID = NV_ENC_PRESET_P1_GUID;
+  init_params_.presetGUID = NV_ENC_PRESET_P4_GUID;
   init_params_.tuningInfo = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
   init_params_.encodeWidth = static_cast<uint32_t>(settings.width);
   init_params_.encodeHeight = static_cast<uint32_t>(settings.height);
@@ -236,7 +240,7 @@ bool NvencSession::Configure(const NvencSettings& settings) {
   NVENC_CHECK(api_.nvEncInitializeEncoder(encoder_, &init_params_),
               "nvEncInitializeEncoder");
 
-  encoder_name_ = "NVENC H.264 High (P1, ultra-low-latency)";
+  encoder_name_ = "NVENC H.264 High (P4, ultra-low-latency)";
   return true;
 }
 

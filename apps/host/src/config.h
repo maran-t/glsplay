@@ -15,9 +15,13 @@ struct VideoConfig {
   int height = 1080;
   int fps = 60;
 
-  // PRD section 2: 15-25 Mbps CBR, stretch 35.
-  int bitrate_kbps = 20000;
-  int max_bitrate_kbps = 35000;
+  // Start value only - Google Congestion Control revises this within a second
+  // of the first RTCP report and then drives it continuously (SetRates), never
+  // exceeding the link estimate or max_bitrate_kbps. A higher start just means
+  // the first ~1s is less soft; the ceiling is what lets a good wired link
+  // actually reach a crisp 1080p60.
+  int bitrate_kbps = 25000;
+  int max_bitrate_kbps = 50000;
 
   // Zero B-frames is not tunable. PRD section 4.2 eliminates them because
   // reordering costs a full 16-33ms of latency, which is most of the budget.

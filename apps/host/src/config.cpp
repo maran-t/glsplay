@@ -82,7 +82,7 @@ Video
   --width N               Capture width (default 1920)
   --height N              Capture height (default 1080)
   --fps N                 Target frame rate (default 60)
-  --bitrate-kbps N        Target CBR bitrate (default 20000)
+  --bitrate-kbps N        Start CBR bitrate, kbps (default 25000; GCC drives it live up to 50000)
   --adapter N             DXGI adapter index (default: first NVIDIA adapter)
   --output N              DXGI output index (default 0)
 
