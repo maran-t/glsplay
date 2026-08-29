@@ -54,22 +54,33 @@ foreach ($svc in @(
   Ok "task '$($svc.n)' at startup"
 }
 
-# --- 4. host + console-reclaim + display tasks -----------------------
-Info 'Host + console reclaim + display'
-# host: on-demand only; reclaim-console.ps1 fires it after tscon
-New-StateTask 'glsplay-host' "$repo\run-host.ps1" $null $user
-# reclaim: SYSTEM, on RDP disconnect -> tscon session to console -> run host
-New-StateTask 'glsplay-reclaim' "$repo\vdd\reclaim-console.ps1" 4 'SYSTEM'
-# display: AS THE USER, on ConsoleConnect (which tscon produces) -> make the
-# MTT virtual display the sole primary at 1920x1080. Runs in the console
-# session's own context, the only place EnumDisplayDevices sees the displays.
+# --- 4. host + display + console-reclaim tasks -----------------------
+Info 'Display + host + console reclaim'
+
+# The autologon console session is the only context where display config and
+# Desktop Duplication both work. Run display config, then the host, at logon,
+# as that user. (Also fire on ConsoleConnect so an RDP-disconnect -> tscon
+# recovery re-runs them.)
+$logon    = New-ScheduledTaskTrigger -AtLogOn -User $user
+$conn     = New-CimInstance -CimClass (Get-CimClass MSFT_TaskSessionStateChangeTrigger root/Microsoft/Windows/TaskScheduler) -ClientOnly -Property @{ StateChange = 1 }  # ConsoleConnect
+$stdSet   = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+
+# display: MTT -> sole primary @ 1920x1080
 $da = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
   "-ExecutionPolicy Bypass -Command ""& '$repo\vdd\set-vdd-res.ps1' *>&1 | " +
   "Out-File '$repo\set-vdd-res.log' -Append -Encoding utf8""")
-$dt = New-CimInstance -CimClass (Get-CimClass MSFT_TaskSessionStateChangeTrigger root/Microsoft/Windows/TaskScheduler) -ClientOnly -Property @{ StateChange = 1 }  # ConsoleConnect
-$ds = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName 'glsplay-display' -Action $da -Trigger $dt -Settings $ds -User $user -RunLevel Highest -Force | Out-Null
-Ok "task 'glsplay-display' (runAs=$user, trigger=ConsoleConnect)"
+Register-ScheduledTask -TaskName 'glsplay-display' -Action $da -Trigger $logon,$conn -Settings $stdSet -User $user -RunLevel Highest -Force | Out-Null
+Ok "task 'glsplay-display' (runAs=$user, trigger=AtLogon + ConsoleConnect)"
+
+# host: launch glsplay-host.exe, a bit after display config
+$ha = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -File `"$repo\run-host.ps1`""
+$hLogon = New-ScheduledTaskTrigger -AtLogOn -User $user
+try { $hLogon.Delay = 'PT20S' } catch {}
+Register-ScheduledTask -TaskName 'glsplay-host' -Action $ha -Trigger $hLogon,$conn -Settings $stdSet -User $user -RunLevel Highest -Force | Out-Null
+Ok "task 'glsplay-host' (runAs=$user, trigger=AtLogon+20s + ConsoleConnect)"
+
+# reclaim: SYSTEM, on RDP disconnect -> tscon session back to the console
+New-StateTask 'glsplay-reclaim' "$repo\vdd\reclaim-console.ps1" 4 'SYSTEM'
 
 # --- 5. lock / power hardening (idempotent) ---------------------------
 Info 'Lock / power'
