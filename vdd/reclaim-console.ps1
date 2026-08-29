@@ -11,10 +11,10 @@ $sid = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" |
 if ($sid) {
   $out = & "$env:SystemRoot\System32\tscon.exe" $sid /dest:console 2>&1
   "$(Get-Date -Format o)  tscon $sid /dest:console -> exit $LASTEXITCODE : $out" | Out-File $log -Append -Encoding utf8
-  # The tscon fires a ConsoleConnect for this session; glsplay-display and
-  # glsplay-host are bound to that trigger and run AS the user in the console
-  # session (the only context where display config + Desktop Duplication work).
-  # Nothing else to do here.
+  Start-Sleep -Seconds 4
+  # Fire the host task; it runs as the interactive user in the now-console session.
+  $r = & "$env:SystemRoot\System32\schtasks.exe" /run /tn glsplay-host 2>&1
+  "$(Get-Date -Format o)  schtasks /run glsplay-host -> $r" | Out-File $log -Append -Encoding utf8
 } else {
   "$(Get-Date -Format o)  no explorer.exe session found - is the autologon user logged in?" | Out-File $log -Append -Encoding utf8
 }
