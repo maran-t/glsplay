@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { SignalingState } from '@/lib/signaling';
-import type { CursorInfo } from '@/hooks/useWebRTC';
 
 export interface StreamPlayerProps {
   stream: MediaStream | null;
@@ -14,10 +13,6 @@ export interface StreamPlayerProps {
   signalingUrl: string;
   hostPresent: boolean;
   pointerLocked: boolean;
-  /** Remote pointer, drawn client-side. */
-  cursor: CursorInfo | null;
-  /** Host capture size, needed to place the pointer overlay under Pointer Lock. */
-  captureSize: { w: number; h: number } | null;
   error: string | null;
 }
 
@@ -63,17 +58,11 @@ export function StreamPlayer({
   signalingUrl,
   hostPresent,
   pointerLocked,
-  cursor,
-  captureSize,
   error,
 }: StreamPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [started, setStarted] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
-  // Cursor shape as a data URL. It is already fully in memory (no network
-  // fetch), so it is used directly - gating render on an Image() onload only
-  // risked the pointer never appearing if that load never committed.
-  const cursorUrl = cursor?.url ?? null;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -84,48 +73,15 @@ export function StreamPlayer({
     };
   }, [stream, videoRef]);
 
-  // The cursor is never in the video. Two ways to draw it locally:
-  //  - not Pointer-Locked: as the video's CSS cursor, so the browser renders it
-  //    at the true mouse position with zero latency (desktop / absolute use);
-  //  - Pointer-Locked: as an <img> overlay at the host-reported position, since
-  //    there is no local mouse position to follow in relative mode.
+  // The host now blends the pointer straight into the video, so there is no
+  // client-side cursor to draw. Just hide the local one while Pointer-Locked
+  // (the baked one is authoritative); show a normal arrow otherwise so the
+  // "click to start" affordance is reachable.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (pointerLocked || (cursor && !cursor.visible)) {
-      video.style.cursor = 'none';
-    } else if (cursorUrl) {
-      video.style.cursor = `url(${cursorUrl}) ${cursor?.hotspotX ?? 0} ${cursor?.hotspotY ?? 0}, auto`;
-    } else {
-      video.style.cursor = '';
-    }
-  }, [cursor, pointerLocked, cursorUrl, videoRef]);
-
-  // Overlay placement for the locked case: map host desktop pixels into the
-  // video's letterboxed content box (object-contain).
-  const cursorOverlay = (() => {
-    if (!pointerLocked || !cursor?.visible || !cursorUrl || !captureSize) return null;
-    if (cursor.width <= 0 || cursor.height <= 0) return null;
-    const v = videoRef.current;
-    if (!v || v.clientWidth === 0 || v.clientHeight === 0) return null;
-    const hostAr = captureSize.w / captureSize.h;
-    let cw = v.clientWidth;
-    let ch = cw / hostAr;
-    if (ch > v.clientHeight) {
-      ch = v.clientHeight;
-      cw = ch * hostAr;
-    }
-    const ox = (v.clientWidth - cw) / 2;
-    const oy = (v.clientHeight - ch) / 2;
-    const sx = cw / captureSize.w;
-    const sy = ch / captureSize.h;
-    return {
-      left: ox + cursor.x * sx,
-      top: oy + cursor.y * sy,
-      width: cursor.width * sx,
-      height: cursor.height * sy,
-    };
-  })();
+    video.style.cursor = pointerLocked ? 'none' : '';
+  }, [pointerLocked, videoRef]);
 
   const start = async () => {
     const video = videoRef.current;
@@ -217,22 +173,6 @@ export function StreamPlayer({
         disablePictureInPicture
         tabIndex={-1}
       />
-
-      {cursorOverlay && cursorUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={cursorUrl}
-          alt=""
-          draggable={false}
-          className="pointer-events-none absolute z-50 select-none"
-          style={{
-            left: cursorOverlay.left,
-            top: cursorOverlay.top,
-            width: cursorOverlay.width,
-            height: cursorOverlay.height,
-          }}
-        />
-      )}
 
       {showOverlay && headline && (
         <div className="absolute inset-0 flex items-center justify-center">

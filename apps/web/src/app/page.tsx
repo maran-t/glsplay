@@ -99,10 +99,6 @@ export default function Page() {
         signalingUrl={config.signalingUrl}
         hostPresent={state.hostPresent}
         pointerLocked={input.pointerLocked}
-        cursor={state.cursor}
-        captureSize={
-          state.hello ? { w: state.hello.display.width, h: state.hello.display.height } : null
-        }
         error={state.error}
       />
 

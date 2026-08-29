@@ -29,6 +29,8 @@ class CursorCompositor {
 
   bool Initialise(ID3D11Device* device);
 
+  bool ready() const { return ready_; }
+
   // Blends the cursor into target in place. Returns false if the cursor is
   // hidden, has no shape yet, or the compositor is not initialised - in every
   // one of those cases the frame is still perfectly usable, just cursorless.

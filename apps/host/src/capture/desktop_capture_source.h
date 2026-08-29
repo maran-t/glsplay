@@ -102,6 +102,19 @@ class DesktopCaptureSource : public webrtc::VideoTrackSourceInterface {
   std::unique_ptr<DxgiDuplicator> duplicator_;
   std::thread thread_;
 
+  // The cursor is blended into the frame here (Sunshine / GeForce NOW model),
+  // so it ships as part of the encoded video with no client-side overlay and
+  // no round-trip lag. composited_texture_ is a private copy the cursor is
+  // drawn onto, so a repeat frame never double-blends it.
+  CursorCompositor cursor_compositor_;
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> composited_texture_;
+  int composited_w_ = 0;
+  int composited_h_ = 0;
+  // PointerPosition.Visible flaps false briefly on this headless box; keep
+  // drawing the last real cursor for a short grace period so it doesn't strobe.
+  CursorState sticky_cursor_{};
+  int cursor_hide_frames_ = 0;
+
   mutable std::mutex cursor_mutex_;
   CursorState cursor_state_;
   std::atomic<bool> running_{false};
