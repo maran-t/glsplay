@@ -28,6 +28,7 @@
 #include "net/host_stats_reporter.h"
 #include "net/peer_session.h"
 #include "net/signaling_client.h"
+#include "util/window_herder.h"
 #include "util/log.h"
 
 namespace {
@@ -177,6 +178,13 @@ int main(int argc, char** argv) {
   glsplay::HostStatsReporter reporter(capture.get(), input.get(), session.get());
   reporter.Start();
 
+  // --- window herding -----------------------------------------------------
+  glsplay::WindowHerder herder;
+  if (config.herd_windows) {
+    herder.Start(capture->desktop_left(), capture->desktop_top(),
+                 capture->width(), capture->height());
+  }
+
   LOG_INFO << "";
   LOG_INFO << "glsplay-host running. Waiting for a browser to join room '"
            << config.signaling.room_id << "'.";
@@ -188,6 +196,7 @@ int main(int argc, char** argv) {
   }
 
   LOG_INFO << "shutting down";
+  herder.Stop();
   reporter.Stop();
   signaling.Stop();
   session->ClosePeer();

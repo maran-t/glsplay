@@ -83,6 +83,7 @@ add_executable(glsplay-host
   src/main.cpp
   src/config.cpp
   src/util/log.cpp
+  src/util/window_herder.cpp
   src/capture/dxgi_duplicator.cpp
   src/capture/d3d11_frame_buffer.cpp
   src/capture/desktop_capture_source.cpp
@@ -137,7 +138,7 @@ target_link_libraries(glsplay-host PRIVATE
   # WASAPI loopback
   ole32 oleaut32 mmdevapi
   # SendInput, window and monitor queries
-  user32 gdi32 shcore
+  user32 gdi32 shcore dwmapi
   # WebSocket signaling client - WinHTTP has native WebSocket support since
   # Windows 8, so no third-party WebSocket library is needed.
   winhttp

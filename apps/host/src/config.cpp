@@ -101,6 +101,10 @@ Network
   --turn-user USER
   --turn-pass PASS
 
+Display
+  --no-herd-windows       Don't pull windows opened on another monitor onto
+                          the captured display
+
 Diagnostics
   --test-pattern          Stream a generated pattern if DXGI capture fails
   --log-level LEVEL       debug | info | warn | error (default info)
@@ -195,6 +199,8 @@ bool HostConfig::Parse(int argc, char** argv) {
       input.enable_keyboard = false;
     } else if (arg == "--test-pattern") {
       allow_test_pattern = true;
+    } else if (arg == "--no-herd-windows") {
+      herd_windows = false;
     } else {
       std::cerr << "error: unknown option " << arg << "\n\n";
       PrintUsage();

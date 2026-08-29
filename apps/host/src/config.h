@@ -77,6 +77,11 @@ struct HostConfig {
   // and makes an RDP-session misconfiguration obvious rather than fatal.
   bool allow_test_pattern = false;
 
+  // Poll for top-level windows that opened on another monitor (the L4 phantom
+  // head is the primary on a headless box) and pull them onto the captured
+  // display, so launched apps appear on the stream.
+  bool herd_windows = true;
+
   std::string log_level = "info";
 
   // Parses argv and the environment. Returns false and prints usage on error.
