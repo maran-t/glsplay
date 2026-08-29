@@ -58,11 +58,17 @@ Win32InputInjector::Win32InputInjector(bool mouse_enabled, bool keyboard_enabled
         SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &saved_speed_, 0)) {
       mouse_prefs_saved_ = true;
       int no_accel[3] = {0, 0, 0};
-      SystemParametersInfoW(SPI_SETMOUSE, 0, no_accel, 0);
+      SystemParametersInfoW(SPI_SETMOUSE, 0, no_accel, SPIF_SENDCHANGE);
       SystemParametersInfoW(SPI_SETMOUSESPEED, 0,
-                            reinterpret_cast<void*>(static_cast<INT_PTR>(10)), 0);
-      LOG_INFO << "mouse acceleration disabled for the session (was accel="
-               << saved_mouse_[2] << " speed=" << saved_speed_ << ')';
+                            reinterpret_cast<void*>(static_cast<INT_PTR>(10)),
+                            SPIF_SENDCHANGE);
+      int now_accel[3] = {0, 0, 0};
+      int now_speed = 0;
+      SystemParametersInfoW(SPI_GETMOUSE, 0, now_accel, 0);
+      SystemParametersInfoW(SPI_GETMOUSESPEED, 0, &now_speed, 0);
+      LOG_INFO << "mouse ballistics: was accel=" << saved_mouse_[2]
+               << " speed=" << saved_speed_ << ", now accel=" << now_accel[2]
+               << " speed=" << now_speed;
     }
   }
 }

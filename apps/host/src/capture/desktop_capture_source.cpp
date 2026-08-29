@@ -166,9 +166,11 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
     if (cursor.visible) {
       sticky_cursor_ = cursor;
       cursor_hide_frames_ = 0;
-    } else if (cursor_hide_frames_ < 12) {  // ~200ms at 60fps
-      // DXGI's PointerPosition is only valid while Visible, so fall back to the
-      // last good one whole. Flaps are 1-2 frames, so this is <=33ms stale.
+    } else if (!sticky_cursor_.shape.empty() && cursor_hide_frames_ < 90) {
+      // DXGI reports Visible=false in bursts on this headless VDD even while
+      // the pointer is plainly in use, which blinks the composited cursor.
+      // Keep drawing the last good one for up to ~1.5s (the pointer is clamped
+      // to the captured monitor, so it cannot really have left the frame).
       ++cursor_hide_frames_;
       cursor = sticky_cursor_;
       cursor.visible = true;
