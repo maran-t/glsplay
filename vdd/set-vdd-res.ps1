@@ -35,28 +35,32 @@ public class VddRes {
 }
 "@
 
-$DM_PELSWIDTH        = 0x80000
-$DM_PELSHEIGHT       = 0x100000
-$DM_DISPLAYFREQUENCY = 0x400000
-$CDS_UPDATEREGISTRY  = 0x01
-$found = $false
+$DM_PELSWIDTH          = 0x80000
+$DM_PELSHEIGHT         = 0x100000
+$DM_DISPLAYFREQUENCY   = 0x400000
+$CDS_UPDATEREGISTRY    = 0x01
+$ATTACHED_TO_DESKTOP   = 0x1
+$any = $false
 
+# The L4 exposes two DXGI outputs headless: its own phantom monitor (often
+# 1280x800) and the MTT virtual display. The host duplicates output 0, which is
+# not reliably the MTT one - so set EVERY attached display to the target mode.
 for ($i = 0; ; $i++) {
   $dd = New-Object VddRes+DISPLAY_DEVICE
   $dd.cb = [Runtime.InteropServices.Marshal]::SizeOf($dd)
   if (-not [VddRes]::EnumDisplayDevices($null, [uint32]$i, [ref]$dd, 0)) { break }
-  if ($dd.DeviceString -match 'MTT|Virtual Display') {
-    $found = $true
-    Write-Host "target: $($dd.DeviceName)  ($($dd.DeviceString))  flags=$($dd.StateFlags)"
-    $dm = New-Object VddRes+DEVMODE
-    $dm.dmSize = [int16][Runtime.InteropServices.Marshal]::SizeOf([type]([VddRes+DEVMODE]))
-    [void][VddRes]::EnumDisplaySettings($dd.DeviceName, -1, [ref]$dm)
-    $dm.dmPelsWidth        = $Width
-    $dm.dmPelsHeight       = $Height
-    $dm.dmDisplayFrequency = $Hz
-    $dm.dmFields = $DM_PELSWIDTH -bor $DM_PELSHEIGHT -bor $DM_DISPLAYFREQUENCY
-    $r = [VddRes]::ChangeDisplaySettingsEx($dd.DeviceName, [ref]$dm, [IntPtr]::Zero, $CDS_UPDATEREGISTRY, [IntPtr]::Zero)
-    Write-Host "ChangeDisplaySettingsEx($Width x $Height @ $Hz) -> $r   (0 = DISP_CHANGE_SUCCESSFUL)"
-  }
+  if (($dd.StateFlags -band $ATTACHED_TO_DESKTOP) -eq 0) { continue }
+  $any = $true
+
+  $dm = New-Object VddRes+DEVMODE
+  $dm.dmSize = [int16][Runtime.InteropServices.Marshal]::SizeOf([type]([VddRes+DEVMODE]))
+  [void][VddRes]::EnumDisplaySettings($dd.DeviceName, -1, [ref]$dm)
+  $from = "$($dm.dmPelsWidth)x$($dm.dmPelsHeight)@$($dm.dmDisplayFrequency)"
+  $dm.dmPelsWidth        = $Width
+  $dm.dmPelsHeight       = $Height
+  $dm.dmDisplayFrequency = $Hz
+  $dm.dmFields = $DM_PELSWIDTH -bor $DM_PELSHEIGHT -bor $DM_DISPLAYFREQUENCY
+  $r = [VddRes]::ChangeDisplaySettingsEx($dd.DeviceName, [ref]$dm, [IntPtr]::Zero, $CDS_UPDATEREGISTRY, [IntPtr]::Zero)
+  Write-Host "$($dd.DeviceName)  ($($dd.DeviceString))  $from -> ${Width}x${Height}@${Hz}  ChangeDisplaySettingsEx=$r  (0=ok, 1=restart-needed)"
 }
-if (-not $found) { Write-Warning "No MTT / Virtual Display device found in EnumDisplayDevices." }
+if (-not $any) { Write-Warning "No display attached to the desktop in this session." }
