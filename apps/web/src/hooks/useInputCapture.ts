@@ -30,12 +30,12 @@ const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
 
 /**
- * Largest single-event mouse delta forwarded to the host. A real mouse, even a
- * 1000Hz one moving fast, stays well under this per event; anything bigger is a
- * Pointer Lock glitch (the jump from the old OS cursor position on the first
- * event after lock, or a focus bounce) and would teleport the remote pointer.
+ * Sanity cap on a single mouse-move delta. A genuine fast flick at a low event
+ * rate can still be a few hundred pixels per event, so this is deliberately
+ * loose - it only exists to swallow an absurd Pointer Lock glitch value, not to
+ * shape normal motion (the first-move-after-lock spike is dropped outright).
  */
-const MAX_MOUSE_DELTA = 160;
+const MAX_MOUSE_DELTA = 1200;
 
 /**
  * Captures mouse, keyboard and gamepad, and packs them onto the input
@@ -140,27 +140,20 @@ export function useInputCapture(opts: InputCaptureOptions): InputCaptureState {
       }
       const encoder = encoderRef.current;
       const t = now();
-      const emit = (dx: number, dy: number) => {
-        if (dx === 0 && dy === 0) return;
-        // Guard against Pointer Lock delta spikes that would teleport the
-        // remote pointer. A genuine fast flick stays under MAX_MOUSE_DELTA per
-        // event; clamp rather than drop so normal motion is untouched.
-        const cx = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dx));
-        const cy = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dy));
-        if (!encoder.mouseMoveRelative(cx, cy, t)) {
-          flush();
-          encoder.mouseMoveRelative(cx, cy, t);
-        }
-      };
-      // getCoalescedEvents exposes sub-frame samples a high-polling-rate mouse
-      // produced between paints. Sending them all preserves the true motion
-      // curve instead of the single decimated sample Chrome surfaces.
-      const pointer = ev as MouseEvent & { getCoalescedEvents?: () => PointerEvent[] };
-      const samples = pointer.getCoalescedEvents?.() ?? [];
-      if (samples.length > 1) {
-        for (const sample of samples) emit(sample.movementX, sample.movementY);
-      } else {
-        emit(ev.movementX, ev.movementY);
+      // Use the event's own movementX/Y. getCoalescedEvents() was tried here,
+      // but its per-sample movement deltas are unreliable under Pointer Lock in
+      // Chrome (sometimes cumulative, sometimes zero) and summing them made the
+      // remote pointer shake. One reliable delta per event is smoother.
+      let dx = ev.movementX;
+      let dy = ev.movementY;
+      if (dx === 0 && dy === 0) return;
+      // Loose sanity clamp only - swallows an absurd glitch value without
+      // shaping real motion.
+      dx = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dx));
+      dy = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dy));
+      if (!encoder.mouseMoveRelative(dx, dy, t)) {
+        flush();
+        encoder.mouseMoveRelative(dx, dy, t);
       }
       scheduleFlush();
     };

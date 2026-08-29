@@ -96,19 +96,12 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
 
   const LONG nx = std::clamp<LONG>(p.x + dx, left, left + width - 1);
   const LONG ny = std::clamp<LONG>(p.y + dy, top, top + height - 1);
+  if (nx == p.x && ny == p.y) return;
 
-  // MOUSEEVENTF_VIRTUALDESK maps 0..65535 across the virtual-screen rect.
-  const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-  const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-  const int vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1);
-  const int vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1);
-
-  INPUT input{};
-  input.type = INPUT_MOUSE;
-  input.mi.dx = static_cast<LONG>((nx - vx) * 65535LL / vw);
-  input.mi.dy = static_cast<LONG>((ny - vy) * 65535LL / vh);
-  input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-  Send(&input, 1);
+  // SetCursorPos takes literal virtual-desktop pixels, so the client delta
+  // lands exactly - no 0..65535 requantisation, which on a wide multi-monitor
+  // virtual desktop is coarse enough to make the pointer shimmer by a pixel.
+  SetCursorPos(nx, ny);
 }
 
 void Win32InputInjector::MouseMoveAbsolute(int16_t x, int16_t y) {
