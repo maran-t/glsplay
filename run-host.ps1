@@ -17,26 +17,25 @@ param(
   [string]$SignalingUrl = 'ws://localhost:8080',
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
-  # The L4 exposes two DXGI outputs headless: [0] its phantom monitor (~1280x800),
-  # [1] the MTT virtual display (1920x1080, pinned by vdd_settings.xml). Capture
-  # the MTT one. Set to '' to let the host auto-pick output 0.
-  [string]$Output = '1',
   [switch]$NoAudio = $true
 )
 
 Set-Location $RepoRoot
 
-# Best-effort: force every attached display to 1920x1080@60. After a tscon the
-# console desktop can take several seconds to re-attach its displays, so retry.
-& powershell -ExecutionPolicy Bypass -Command {
-  param($repo)
-  for ($try = 1; $try -le 10; $try++) {
-    $out = & powershell -ExecutionPolicy Bypass -File (Join-Path $repo 'vdd\set-vdd-res.ps1') -Width 1920 -Height 1080 -Hz 60 2>&1
-    "$(Get-Date -Format o)  attempt $try`n$out"
-    if ($out -notmatch 'No display attached') { break }
-    Start-Sleep -Seconds 2
-  }
-} -args $RepoRoot 2>&1 | Out-File "$LogPath.res" -Encoding utf8
+# Make the MTT virtual display the sole, primary desktop at 1920x1080@60. After
+# a tscon the console can take a few seconds to re-attach its displays, so retry.
+# Exit 0  = MTT is now the only output  -> let the host auto-pick output 0.
+# Exit >0 = MTT not ready / still extended -> pin the host to output 1 (MTT).
+"$(Get-Date -Format o)  set-vdd-res run" | Out-File "$LogPath.res" -Encoding utf8
+$resOk = $false
+for ($try = 1; $try -le 12; $try++) {
+  $out = & powershell -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'vdd\set-vdd-res.ps1') -Width 1920 -Height 1080 -Hz 60 2>&1
+  "$(Get-Date -Format o)  attempt $try (exit $LASTEXITCODE)`n$out`n" | Out-File "$LogPath.res" -Append -Encoding utf8
+  if ($LASTEXITCODE -eq 0) { $resOk = $true; break }
+  Start-Sleep -Seconds 2
+}
+$Output = if ($resOk) { '' } else { '1' }
+"$(Get-Date -Format o)  resOk=$resOk  -> --output '$Output'" | Out-File "$LogPath.res" -Append -Encoding utf8
 Start-Sleep -Seconds 2
 
 $exe = Join-Path $RepoRoot 'apps\host\build\bin\Release\glsplay-host.exe'
