@@ -85,6 +85,13 @@ export function useWebRTC(config: WebRTCConfig | null) {
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
   /** Last decoded cursor shape as a data URL; reused when only visibility flips. */
   const lastCursorUrl = useRef<string | null>(null);
+  /** Last non-zero shape dimensions, kept for visibility-only cursor updates
+   *  that carry width/height 0 - without this the overlay would collapse. */
+  const lastCursorShape = useRef({ width: 0, height: 0, hotspotX: 0, hotspotY: 0 });
+  /** Pending "hide the cursor" timer. The host reports Visible=false in brief
+   *  flaps on this headless box; wait out a short grace period before hiding so
+   *  the pointer doesn't strobe. */
+  const cursorHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const patch = useCallback((next: Partial<WebRTCState>) => {
     setState((prev) => ({ ...prev, ...next }));
@@ -154,18 +161,45 @@ export function useWebRTC(config: WebRTCConfig | null) {
                 // A malformed shape just means we keep drawing the previous one.
               }
             }
-            patch({
-              cursor: {
-                url: lastCursorUrl.current,
-                x: msg.x,
-                y: msg.y,
+            // Visibility-only updates carry width/height 0; keep the last real
+            // shape size so the overlay stays put instead of collapsing.
+            if (msg.width > 0 && msg.height > 0) {
+              lastCursorShape.current = {
                 width: msg.width,
                 height: msg.height,
                 hotspotX: msg.hotspotX,
                 hotspotY: msg.hotspotY,
-                visible: msg.visible,
-              },
-            });
+              };
+            }
+            const shape = lastCursorShape.current;
+            // Debounce hide, apply show immediately.
+            if (cursorHideTimer.current) {
+              clearTimeout(cursorHideTimer.current);
+              cursorHideTimer.current = null;
+            }
+            const applyCursor = (visible: boolean) =>
+              patch({
+                cursor: {
+                  url: lastCursorUrl.current,
+                  x: msg.x,
+                  y: msg.y,
+                  width: shape.width,
+                  height: shape.height,
+                  hotspotX: shape.hotspotX,
+                  hotspotY: shape.hotspotY,
+                  visible,
+                },
+              });
+            if (!msg.visible) {
+              // Move to the reported position now, but delay the actual hide.
+              applyCursor(true);
+              cursorHideTimer.current = setTimeout(() => {
+                cursorHideTimer.current = null;
+                applyCursor(false);
+              }, 250);
+              return;
+            }
+            applyCursor(true);
           }
         };
       }
@@ -329,6 +363,10 @@ export function useWebRTC(config: WebRTCConfig | null) {
 
     return () => {
       disposed = true;
+      if (cursorHideTimer.current) {
+        clearTimeout(cursorHideTimer.current);
+        cursorHideTimer.current = null;
+      }
       client.close();
       inputChannelRef.current = null;
       controlChannelRef.current = null;

@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <vector>
 
@@ -53,19 +54,60 @@ Win32InputInjector::~Win32InputInjector() {
   ReleaseAll();
 }
 
+void Win32InputInjector::SetCaptureBounds(int left, int top, int width, int height) {
+  bounds_left_.store(left, std::memory_order_relaxed);
+  bounds_top_.store(top, std::memory_order_relaxed);
+  bounds_width_.store(width, std::memory_order_relaxed);
+  bounds_height_.store(height, std::memory_order_relaxed);
+}
+
 void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
 
+  // Integrate the delta against the current pointer position and re-inject as
+  // an absolute move. MOUSEEVENTF_MOVE relative injection runs through the
+  // Windows pointer-acceleration curve, so a quick flick gets multiplied and
+  // the pointer lands in a corner. Absolute moves are never accelerated, so
+  // the client delta maps 1:1 to desktop pixels.
+  POINT p{};
+  if (!GetCursorPos(&p)) {
+    INPUT fallback{};
+    fallback.type = INPUT_MOUSE;
+    fallback.mi.dx = dx;
+    fallback.mi.dy = dy;
+    fallback.mi.dwFlags = MOUSEEVENTF_MOVE;
+    Send(&fallback, 1);
+    return;
+  }
+
+  // Clamp to the captured monitor when its rect is known, otherwise to the
+  // whole virtual desktop - either way a runaway delta stays on-screen.
+  int left = bounds_left_.load(std::memory_order_relaxed);
+  int top = bounds_top_.load(std::memory_order_relaxed);
+  int width = bounds_width_.load(std::memory_order_relaxed);
+  int height = bounds_height_.load(std::memory_order_relaxed);
+  if (width <= 0 || height <= 0) {
+    left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  }
+
+  const LONG nx = std::clamp<LONG>(p.x + dx, left, left + width - 1);
+  const LONG ny = std::clamp<LONG>(p.y + dy, top, top + height - 1);
+
+  // MOUSEEVENTF_VIRTUALDESK maps 0..65535 across the virtual-screen rect.
+  const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN) - 1);
+  const int vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN) - 1);
+
   INPUT input{};
   input.type = INPUT_MOUSE;
-  input.mi.dx = dx;
-  input.mi.dy = dy;
-  // Relative motion without MOUSEEVENTF_ABSOLUTE. Windows applies pointer
-  // acceleration to this, which games with raw input ignore but desktop
-  // applications do not - so the same delta can move different distances in a
-  // game and on the desktop behind it.
-  input.mi.dwFlags = MOUSEEVENTF_MOVE;
+  input.mi.dx = static_cast<LONG>((nx - vx) * 65535LL / vw);
+  input.mi.dy = static_cast<LONG>((ny - vy) * 65535LL / vh);
+  input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
   Send(&input, 1);
 }
 

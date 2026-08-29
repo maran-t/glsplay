@@ -107,6 +107,10 @@ class DxgiDuplicator {
 
   int width() const { return width_; }
   int height() const { return height_; }
+  // Top-left of the captured output in virtual-desktop coordinates. Needed to
+  // map client mouse deltas onto the monitor the viewer is actually watching.
+  int desktop_left() const { return desktop_left_; }
+  int desktop_top() const { return desktop_top_; }
   const std::string& adapter_description() const { return adapter_description_; }
   DXGI_FORMAT format() const { return format_; }
 
@@ -139,6 +143,8 @@ class DxgiDuplicator {
   int output_index_ = 0;
   int width_ = 0;
   int height_ = 0;
+  int desktop_left_ = 0;
+  int desktop_top_ = 0;
   DXGI_FORMAT format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
   std::string adapter_description_;
 

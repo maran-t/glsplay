@@ -118,6 +118,10 @@ int main(int argc, char** argv) {
   // --- input ----------------------------------------------------------------
   auto injector = std::make_unique<glsplay::Win32InputInjector>(
       config.input.enable_mouse, config.input.enable_keyboard);
+  // Relative mouse moves are clamped to the monitor being captured, so the
+  // pointer can't be flung onto the L4's phantom head or off the desktop.
+  injector->SetCaptureBounds(capture->desktop_left(), capture->desktop_top(),
+                             capture->width(), capture->height());
   auto gamepad = glsplay::CreateGamepadSink(config.input.enable_gamepad);
   LOG_INFO << "gamepad: " << gamepad->description();
 

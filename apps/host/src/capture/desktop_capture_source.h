@@ -53,6 +53,8 @@ class DesktopCaptureSource : public webrtc::VideoTrackSourceInterface {
 
   int width() const { return duplicator_ ? duplicator_->width() : 0; }
   int height() const { return duplicator_ ? duplicator_->height() : 0; }
+  int desktop_left() const { return duplicator_ ? duplicator_->desktop_left() : 0; }
+  int desktop_top() const { return duplicator_ ? duplicator_->desktop_top() : 0; }
   std::string adapter_description() const {
     return duplicator_ ? duplicator_->adapter_description() : std::string();
   }

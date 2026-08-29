@@ -202,6 +202,8 @@ bool DxgiDuplicator::CreateDuplication(int output_index) {
   if (SUCCEEDED(output_->GetDesc(&output_desc))) {
     width_ = output_desc.DesktopCoordinates.right - output_desc.DesktopCoordinates.left;
     height_ = output_desc.DesktopCoordinates.bottom - output_desc.DesktopCoordinates.top;
+    desktop_left_ = output_desc.DesktopCoordinates.left;
+    desktop_top_ = output_desc.DesktopCoordinates.top;
     if (!output_desc.AttachedToDesktop) {
       LOG_ERROR << "output " << output_index << " is not attached to the desktop";
       return false;

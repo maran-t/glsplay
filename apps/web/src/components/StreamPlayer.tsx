@@ -70,6 +70,27 @@ export function StreamPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const [started, setStarted] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  // The cursor shape URL swaps on every pointer-shape change (arrow, I-beam,
+  // hand...). Rendering the new <img> src directly shows nothing for a frame
+  // or two while it decodes - a visible flicker. Decode it off-screen first
+  // and only promote it here once it is ready.
+  const [readyCursorUrl, setReadyCursorUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const url = cursor?.url ?? null;
+    if (!url) {
+      setReadyCursorUrl(null);
+      return;
+    }
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setReadyCursorUrl(url);
+    };
+    img.src = url;
+    return () => {
+      cancelled = true;
+    };
+  }, [cursor?.url]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -90,17 +111,18 @@ export function StreamPlayer({
     if (!video) return;
     if (pointerLocked || (cursor && !cursor.visible)) {
       video.style.cursor = 'none';
-    } else if (cursor?.url) {
-      video.style.cursor = `url(${cursor.url}) ${cursor.hotspotX} ${cursor.hotspotY}, auto`;
+    } else if (readyCursorUrl) {
+      video.style.cursor = `url(${readyCursorUrl}) ${cursor?.hotspotX ?? 0} ${cursor?.hotspotY ?? 0}, auto`;
     } else {
       video.style.cursor = '';
     }
-  }, [cursor, pointerLocked, videoRef]);
+  }, [cursor, pointerLocked, readyCursorUrl, videoRef]);
 
   // Overlay placement for the locked case: map host desktop pixels into the
   // video's letterboxed content box (object-contain).
   const cursorOverlay = (() => {
-    if (!pointerLocked || !cursor?.visible || !cursor.url || !captureSize) return null;
+    if (!pointerLocked || !cursor?.visible || !readyCursorUrl || !captureSize) return null;
+    if (cursor.width <= 0 || cursor.height <= 0) return null;
     const v = videoRef.current;
     if (!v || v.clientWidth === 0 || v.clientHeight === 0) return null;
     const hostAr = captureSize.w / captureSize.h;
@@ -213,13 +235,13 @@ export function StreamPlayer({
         tabIndex={-1}
       />
 
-      {cursorOverlay && cursor?.url && (
+      {cursorOverlay && readyCursorUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={cursor.url}
+          src={readyCursorUrl}
           alt=""
           draggable={false}
-          className="pointer-events-none absolute z-20 select-none"
+          className="pointer-events-none absolute z-50 select-none"
           style={{
             left: cursorOverlay.left,
             top: cursorOverlay.top,

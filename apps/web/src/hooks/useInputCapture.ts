@@ -30,6 +30,14 @@ const DOM_DELTA_LINE = 1;
 const DOM_DELTA_PAGE = 2;
 
 /**
+ * Largest single-event mouse delta forwarded to the host. A real mouse, even a
+ * 1000Hz one moving fast, stays well under this per event; anything bigger is a
+ * Pointer Lock glitch (the jump from the old OS cursor position on the first
+ * event after lock, or a focus bounce) and would teleport the remote pointer.
+ */
+const MAX_MOUSE_DELTA = 160;
+
+/**
  * Captures mouse, keyboard and gamepad, and packs them onto the input
  * DataChannel (PRD section 4.4).
  *
@@ -52,6 +60,9 @@ export function useInputCapture(opts: InputCaptureOptions): InputCaptureState {
   const heldKeys = useRef(new Set<string>());
   /** Last gamepad payload per index, to suppress duplicate frames. */
   const lastPad = useRef(new Map<number, string>());
+  /** Set when Pointer Lock engages; the first mousemove after it carries a
+   *  bogus jump from the previous OS cursor position and is dropped. */
+  const swallowNextMove = useRef(false);
   const startRef = useRef(0);
 
   if (startRef.current === 0 && typeof performance !== 'undefined') {
@@ -102,6 +113,7 @@ export function useInputCapture(opts: InputCaptureOptions): InputCaptureState {
     const onPointerLockChange = () => {
       const locked = document.pointerLockElement === target.current;
       setPointerLocked(locked);
+      if (locked) swallowNextMove.current = true;
       sendControl({ type: 'set-pointer-mode', mode: locked ? 'relative' : 'absolute' });
       // Leaving lock mid-keypress would otherwise latch that key down on the
       // remote desktop with no matching keyup ever arriving.
@@ -120,23 +132,35 @@ export function useInputCapture(opts: InputCaptureOptions): InputCaptureState {
 
     const onMouseMove = (ev: MouseEvent) => {
       if (document.pointerLockElement !== element) return;
+      // The first event after Pointer Lock engages reports the delta from the
+      // pre-lock cursor position - often hundreds of pixels. Drop it whole.
+      if (swallowNextMove.current) {
+        swallowNextMove.current = false;
+        return;
+      }
       const encoder = encoderRef.current;
       const t = now();
+      const emit = (dx: number, dy: number) => {
+        if (dx === 0 && dy === 0) return;
+        // Guard against Pointer Lock delta spikes that would teleport the
+        // remote pointer. A genuine fast flick stays under MAX_MOUSE_DELTA per
+        // event; clamp rather than drop so normal motion is untouched.
+        const cx = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dx));
+        const cy = Math.max(-MAX_MOUSE_DELTA, Math.min(MAX_MOUSE_DELTA, dy));
+        if (!encoder.mouseMoveRelative(cx, cy, t)) {
+          flush();
+          encoder.mouseMoveRelative(cx, cy, t);
+        }
+      };
       // getCoalescedEvents exposes sub-frame samples a high-polling-rate mouse
       // produced between paints. Sending them all preserves the true motion
       // curve instead of the single decimated sample Chrome surfaces.
       const pointer = ev as MouseEvent & { getCoalescedEvents?: () => PointerEvent[] };
       const samples = pointer.getCoalescedEvents?.() ?? [];
       if (samples.length > 1) {
-        for (const sample of samples) {
-          if (!encoder.mouseMoveRelative(sample.movementX, sample.movementY, t)) {
-            flush();
-            encoder.mouseMoveRelative(sample.movementX, sample.movementY, t);
-          }
-        }
-      } else if (!encoder.mouseMoveRelative(ev.movementX, ev.movementY, t)) {
-        flush();
-        encoder.mouseMoveRelative(ev.movementX, ev.movementY, t);
+        for (const sample of samples) emit(sample.movementX, sample.movementY);
+      } else {
+        emit(ev.movementX, ev.movementY);
       }
       scheduleFlush();
     };

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <unordered_set>
@@ -14,6 +15,12 @@ class Win32InputInjector {
  public:
   Win32InputInjector(bool mouse_enabled, bool keyboard_enabled);
   ~Win32InputInjector();
+
+  // Rect of the monitor being captured, in virtual-desktop pixels. Relative
+  // mouse moves are integrated against the live cursor position and clamped to
+  // this, so a fast flick can never fling the pointer onto another head or off
+  // the desktop. Called once at startup, before any input arrives.
+  void SetCaptureBounds(int left, int top, int width, int height);
 
   // dx and dy are raw deltas from the browser's Pointer Lock movementX/Y.
   void MouseMoveRelative(int16_t dx, int16_t dy);
@@ -35,6 +42,12 @@ class Win32InputInjector {
  private:
   const bool mouse_enabled_;
   const bool keyboard_enabled_;
+
+  // Captured-monitor rect, set once before input starts, then read-only.
+  std::atomic<int32_t> bounds_left_{0};
+  std::atomic<int32_t> bounds_top_{0};
+  std::atomic<int32_t> bounds_width_{0};   // 0 until SetCaptureBounds: fall
+  std::atomic<int32_t> bounds_height_{0};  // back to the whole virtual desktop
 
   // Tracked so ReleaseAll knows what to lift. Guarded because input arrives on
   // the libwebrtc network thread while ReleaseAll can fire from the signaling
