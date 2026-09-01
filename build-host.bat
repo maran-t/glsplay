@@ -2,7 +2,7 @@
 rem ============================================================================
 rem  build-host.bat  -  configure + build glsplay-host (native C++, Windows)
 rem
-rem  Usage:
+rem  Usage (from a terminal, or just double-click for a Release build):
 rem    build-host.bat                 Release build (default)
 rem    build-host.bat Debug           Debug build
 rem    build-host.bat clean           delete apps\host\build, then Release build
@@ -17,6 +17,11 @@ rem    - apps\host\third_party\nvenc\Interface\nvEncodeAPI.h  (committed)
 rem ============================================================================
 setlocal EnableDelayedExpansion
 
+rem --- keep the window open if this was double-clicked in Explorer -----------
+set "DBLCLICK="
+echo(%cmdcmdline%| findstr /i /c:"%~nx0" >nul && set "DBLCLICK=1"
+
+set "ERR=0"
 set "REPO_ROOT=%~dp0"
 set "HOST_DIR=%REPO_ROOT%apps\host"
 set "BUILD_DIR=%HOST_DIR%\build"
@@ -51,7 +56,8 @@ if errorlevel 1 (
   echo [error] cmake not found on PATH.
   echo         Open the "x64 Native Tools Command Prompt for VS 2022" and re-run,
   echo         or add CMake to PATH ^(installed with the VS C++ workload^).
-  exit /b 1
+  set "ERR=1"
+  goto end
 )
 
 rem --- dependency check ------------------------------------------------------
@@ -59,11 +65,13 @@ if not exist "%HOST_DIR%\third_party\webrtc\include" (
   echo [error] libwebrtc not found: %HOST_DIR%\third_party\webrtc\include
   echo         Fetch it first:  powershell -ExecutionPolicy Bypass -File vm-scripts\fetch-deps.ps1
   echo         Details:         apps\host\third_party\README.md
-  exit /b 1
+  set "ERR=1"
+  goto end
 )
 if not exist "%HOST_DIR%\third_party\nvenc\Interface\nvEncodeAPI.h" (
   echo [error] NVENC headers not found: %HOST_DIR%\third_party\nvenc\Interface\nvEncodeAPI.h
-  exit /b 1
+  set "ERR=1"
+  goto end
 )
 
 rem --- clean ---------------------------------------------------------------------
@@ -78,7 +86,8 @@ echo [1/2] cmake configure
 cmake -S "%HOST_DIR%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 %CMAKE_EXTRA%
 if errorlevel 1 (
   echo [error] configure failed
-  exit /b 1
+  set "ERR=1"
+  goto end
 )
 
 rem --- build ----------------------------------------------------------------
@@ -87,7 +96,8 @@ echo [2/2] cmake build ^(%CONFIG%^)
 cmake --build "%BUILD_DIR%" --config %CONFIG% --parallel
 if errorlevel 1 (
   echo [error] build failed
-  exit /b 1
+  set "ERR=1"
+  goto end
 )
 
 set "EXE=%BUILD_DIR%\bin\%CONFIG%\glsplay-host.exe"
@@ -97,8 +107,15 @@ if exist "%EXE%" (
   echo   %EXE%
   for %%F in ("%EXE%") do echo   built %%~tF   %%~zF bytes
   echo ===========================================================================
-  exit /b 0
 ) else (
   echo [error] build reported success but %EXE% is missing
-  exit /b 1
+  set "ERR=1"
 )
+
+:end
+echo(
+if defined DBLCLICK (
+  echo Press any key to close . . .
+  pause >nul
+)
+exit /b %ERR%
