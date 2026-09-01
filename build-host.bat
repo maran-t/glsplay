@@ -7,10 +7,16 @@ rem    build-host.bat                 Release build (default)
 rem    build-host.bat Debug           Debug build
 rem    build-host.bat clean           delete apps\host\build, then Release build
 rem    build-host.bat clean Debug     delete build dir, then Debug build
-rem    build-host.bat Release novigem  Release build with -DGLSPLAY_ENABLE_VIGEM=OFF
+rem    build-host.bat novigem         Release build with -DGLSPLAY_ENABLE_VIGEM=OFF
+rem    build-host.bat vs2022          force the "Visual Studio 17 2022" generator
+rem                                   (also: vs2026, vs2019)
+rem
+rem  The generator is auto-detected by default (newest installed VS). If the
+rem  build dir was configured with a different VS version, the script wipes the
+rem  stale CMake cache and retries automatically.
 rem
 rem  Prereqs (see docs\BUILD-HOST.md):
-rem    - Visual Studio 2022 + "Desktop development with C++" (MSVC v143)
+rem    - Visual Studio 2022+ with "Desktop development with C++"
 rem    - CMake 3.24+ on PATH (ships with the VS workload)
 rem    - apps\host\third_party\webrtc\   (download - see third_party\README.md)
 rem    - apps\host\third_party\nvenc\Interface\nvEncodeAPI.h  (committed)
@@ -29,6 +35,7 @@ set "BUILD_DIR=%HOST_DIR%\build"
 set "CONFIG=Release"
 set "DO_CLEAN=0"
 set "CMAKE_EXTRA="
+set "GEN="
 
 rem --- parse args (order-independent) --------------------------------------
 :parse
@@ -38,6 +45,9 @@ if /i "%~1"=="Release"  ( set "CONFIG=Release" & shift & goto parse )
 if /i "%~1"=="Debug"    ( set "CONFIG=Debug"   & shift & goto parse )
 if /i "%~1"=="novigem"  ( set "CMAKE_EXTRA=!CMAKE_EXTRA! -DGLSPLAY_ENABLE_VIGEM=OFF" & shift & goto parse )
 if /i "%~1"=="nonvml"   ( set "CMAKE_EXTRA=!CMAKE_EXTRA! -DGLSPLAY_ENABLE_NVML=OFF"  & shift & goto parse )
+if /i "%~1"=="vs2019"   ( set "GEN=-G ""Visual Studio 16 2019""" & shift & goto parse )
+if /i "%~1"=="vs2022"   ( set "GEN=-G ""Visual Studio 17 2022""" & shift & goto parse )
+if /i "%~1"=="vs2026"   ( set "GEN=-G ""Visual Studio 18 2026""" & shift & goto parse )
 echo [warn] unknown argument "%~1" - ignored
 shift
 goto parse
@@ -47,6 +57,8 @@ echo(
 echo === glsplay-host build =====================================================
 echo   config    : %CONFIG%
 echo   host dir  : %HOST_DIR%
+if defined GEN echo   generator :%GEN:-G =%
+if not defined GEN echo   generator : auto ^(newest installed Visual Studio^)
 echo   extra     :%CMAKE_EXTRA%
 echo ===========================================================================
 
@@ -54,7 +66,7 @@ rem --- tool check -------------------------------------------------------------
 where cmake >nul 2>nul
 if errorlevel 1 (
   echo [error] cmake not found on PATH.
-  echo         Open the "x64 Native Tools Command Prompt for VS 2022" and re-run,
+  echo         Open the "x64 Native Tools Command Prompt for VS" and re-run,
   echo         or add CMake to PATH ^(installed with the VS C++ workload^).
   set "ERR=1"
   goto end
@@ -80,15 +92,21 @@ if "%DO_CLEAN%"=="1" (
   if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
 )
 
-rem --- configure --------------------------------------------------------------
+rem --- configure (with one stale-cache recovery) -----------------------------
 echo(
 echo [1/2] cmake configure
-cmake -S "%HOST_DIR%" -B "%BUILD_DIR%" -G "Visual Studio 17 2022" -A x64 %CMAKE_EXTRA%
-if errorlevel 1 (
-  echo [error] configure failed
-  set "ERR=1"
-  goto end
+call :do_configure
+if "!ERR!"=="1" (
+  if exist "%BUILD_DIR%\CMakeCache.txt" (
+    echo(
+    echo [recover] configure failed - wiping stale CMake cache and retrying
+    del /q "%BUILD_DIR%\CMakeCache.txt" >nul 2>nul
+    if exist "%BUILD_DIR%\CMakeFiles" rmdir /s /q "%BUILD_DIR%\CMakeFiles"
+    set "ERR=0"
+    call :do_configure
+  )
 )
+if "!ERR!"=="1" goto end
 
 rem --- build ----------------------------------------------------------------
 echo(
@@ -119,3 +137,9 @@ if defined DBLCLICK (
   pause >nul
 )
 exit /b %ERR%
+
+rem --- subroutine: run cmake configure, set ERR on failure -----------------
+:do_configure
+cmake -S "%HOST_DIR%" -B "%BUILD_DIR%" %GEN% -A x64 %CMAKE_EXTRA%
+if errorlevel 1 set "ERR=1"
+goto :eof
