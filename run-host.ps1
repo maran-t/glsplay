@@ -23,7 +23,9 @@ param(
   # host.log logs "DXGI adapters: [0] NVIDIA L4 outputs=2" - if that count or
   # ordering ever changes, revisit this.
   [string]$Output = '1',
-  [switch]$NoAudio = $true
+  # Default to audio ON. Pass -NoAudio to disable (e.g. on a VM with no
+  # virtual audio endpoint installed).
+  [switch]$NoAudio = $false
 )
 
 Set-Location $RepoRoot
