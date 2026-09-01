@@ -7,9 +7,11 @@ dist/
 apps/host/build/
 apps/host/out/
 
-# third-party SDKs fetched under their own licence - see vm-scripts/fetch-deps.ps1
+# third-party SDKs fetched under their own licence - see apps/host/third_party/README.md
+# libwebrtc (~800 MB, single .lib is 347 MB > GitHub's 100 MB cap) and ViGEmClient
+# stay out of the repo. The NVENC headers (Interface/*.h) ARE committed - small, and
+# otherwise gated behind an NVIDIA developer login.
 apps/host/third_party/webrtc/
-apps/host/third_party/nvenc/
 apps/host/third_party/ViGEmClient/
 
 .env
