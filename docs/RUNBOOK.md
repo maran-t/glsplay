@@ -2,6 +2,14 @@
 
 What runs where, and how to verify each link before adding the next one.
 
+> **MOVED (repo split).** The control plane this runbook brings up — `apps/web`,
+> `apps/signaling`, `packages/protocol/src` and the `.env` files they read — now
+> lives in **a separate web/signaling/protocol repo (not yet created)**. All the
+> `npm ... -w @glsplay/web` / `-w @glsplay/signaling` steps and `apps/signaling/test/smoke.mjs`
+> below run inside that repo's checkout, not `C:\glsplay`. This `glsplay` repo is
+> now host-only. The firewall/secret/verification logic is otherwise unchanged;
+> `docs/DEPLOY-GCP-L4.md` is the current single-file runbook.
+
 > **Status:** the host daemon is not finished yet. Everything below validates the
 > control plane — signaling, firewall, secret, and the browser client. When the host
 > lands, it slots into step 4 with no other changes.

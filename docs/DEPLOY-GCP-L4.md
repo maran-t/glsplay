@@ -9,6 +9,16 @@ Every external download has its source link. Every fix we hit the hard way is in
 > daily-use cheat sheet. §9 is reference. Do not skip the driver-model check in
 > §4 or the RDP/console section in §6 — they are the two things that waste hours.
 
+> **MOVED (repo split).** `apps/web`, `apps/signaling` and `packages/protocol/src`
+> now live in **a separate web/signaling/protocol repo (not yet created)**. This
+> `glsplay` repo is now host-only: `apps/host/` (C++) plus the VM scripts, and
+> `packages/protocol/include/glsplay_input.h` (the one header the host `#include`s).
+> Anything below about building/running the Node signaling broker or the Next.js
+> web client — the `@glsplay/signaling` / `@glsplay/web` workspaces, `apps/web/.env`,
+> the `glsplay-signaling` / `glsplay-web` scheduled tasks — belongs to that other
+> repo now and is kept here only for reference until it is ported. The host build
+> (§4–§6, §8 "Build the host") and the RDP/console task chain are unchanged.
+
 ---
 
 ## 1. What runs, and where
@@ -16,16 +26,16 @@ Every external download has its source link. Every fix we hit the hard way is in
 ```
    LAPTOP (browser)                         THE VM  (GCP g2-standard-4, 1x L4)
    ───────────────                          ────────────────────────────────
-   Chrome  ───ws://<VM_IP>:8080───▶  apps/signaling      (Node, :8080)   [task: glsplay-signaling]
-     │                               apps/web            (Next.js, :3000)[task: glsplay-web]
-     │                               glsplay-host.exe    (C++)           [task: glsplay-host]
+   Chrome  ───ws://<VM_IP>:8080───▶  signaling broker    (Node, :8080)   [separate web/signaling repo]
+     │                               web client          (Next.js, :3000)[separate web/signaling repo]
+     │                               glsplay-host.exe    (C++)           [this repo — task: glsplay-host]
      └────── WebRTC / SRTP, UDP 50000-50100 ──────────▶  glsplay-host.exe (direct P2P once ICE completes)
 ```
 
-- **`apps/signaling`** — WebSocket broker. Pairs one host + one client per room, relays opaque SDP/ICE. Never touches media.
-- **`apps/web`** — Next.js browser client. Answer-only WebRTC peer; renders the video track, sends packed input on a data channel, draws the cursor locally.
-- **`apps/host` → `glsplay-host.exe`** — DXGI Desktop Duplication → NVENC (H.264) → libwebrtc → UDP. Injects input with `SendInput`. Reports cursor shape+position on the control channel.
-- **`packages/protocol`** — shared TS message definitions used by both signaling and web.
+- **signaling broker** (`apps/signaling`, *moved to the separate repo*) — WebSocket broker. Pairs one host + one client per room, relays opaque SDP/ICE. Never touches media.
+- **web client** (`apps/web`, *moved to the separate repo*) — Next.js browser client. Answer-only WebRTC peer; renders the video track, sends packed input on a data channel, draws the cursor locally.
+- **`apps/host` → `glsplay-host.exe`** *(this repo)* — DXGI Desktop Duplication → NVENC (H.264) → libwebrtc → UDP. Injects input with `SendInput`. Reports cursor shape+position on the control channel.
+- **`packages/protocol`** — the wire contract. The TS message definitions (`src/`) moved to the separate repo with web+signaling; **this repo keeps only `include/glsplay_input.h`**, the C++ binary-input header the host compiles. The two must be kept byte-in-sync by hand (see §9, Robustness in `TODO.md`).
 
 ### Exact stack currently running (2026-08-29)
 
@@ -117,7 +127,9 @@ RDP in as `maranmani_t99`. Install, in this order:
 ```powershell
 git clone https://github.com/maran-t/glsplay.git C:\glsplay
 cd C:\glsplay
-npm install
+# npm install  — MOVED: this repo is now host-only C++ (no package.json). Node/npm
+# are needed only for the separate web/signaling repo; clone that and `npm install`
+# inside it if you are also running the broker + web client on this VM.
 ```
 
 ---
@@ -239,10 +251,12 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 
 | Task | Trigger | Runs as | Action |
 |---|---|---|---|
-| `glsplay-signaling` | At startup | SYSTEM | `cmd /c "cd /d C:\glsplay && npm.cmd run start -w @glsplay/signaling"` |
-| `glsplay-web` | At startup | SYSTEM | same for `@glsplay/web` |
+| ~~`glsplay-signaling`~~ | ~~At startup~~ | ~~SYSTEM~~ | **MOVED** — the registration loop is commented out in `setup-headless.ps1` (§3 of that script). Register from the separate web/signaling repo, pointed at its own checkout. |
+| ~~`glsplay-web`~~ | ~~At startup~~ | ~~SYSTEM~~ | **MOVED** — same as above. |
 | `glsplay-host` | *(none — on demand)* | `maranmani_t99` | `powershell -File C:\glsplay\run-host.ps1` |
 | `glsplay-reclaim` | **Session RemoteDisconnect** | SYSTEM | `powershell -File C:\glsplay\vdd\reclaim-console.ps1` |
+
+`setup-headless.ps1` now registers only `glsplay-host` and `glsplay-reclaim`.
 
 **Flow when you disconnect RDP:**
 
@@ -292,8 +306,9 @@ NEXT_PUBLIC_ROOM_ID=poc
 NEXT_PUBLIC_ROOM_SECRET=<secret>
 ```
 
-`C:\glsplay\apps\web\.env` — **read by `next build`** (Next.js loads `.env` from the
-project dir, not the monorepo root):
+`apps/web/.env` — **read by `next build`** (Next.js loads `.env` from the project
+dir, not the monorepo root). **MOVED:** this file now lives in the separate
+web/signaling repo's checkout, not under `C:\glsplay`:
 
 ```ini
 GLSPLAY_ROOM_SECRET=<secret>
@@ -318,8 +333,13 @@ Machine env var (so `run-host.ps1` / `glsplay-host.exe` get the secret without a
 
 ### Build the JS side (always)
 
+> **MOVED to the separate web/signaling/protocol repo.** The commands below no
+> longer work in `C:\glsplay` (no `package.json`, no `@glsplay/*` workspaces).
+> Run them inside that repo's checkout instead. Kept here as the reference for
+> what that repo's deploy has to do on this VM.
+
 ```powershell
-cd C:\glsplay
+cd <web-signaling-repo>
 npm install
 npm run build -w @glsplay/protocol
 npm run build -w @glsplay/signaling
@@ -351,11 +371,11 @@ RTTI off, libwebrtc API drift between Shiguredo releases).
 
 ### Daily use
 
-Services (`glsplay-signaling`, `glsplay-web`) auto-start at boot. If the VM is
-already up and they aren't running:
+The signaling broker + web client (`glsplay-signaling`, `glsplay-web` tasks) are
+now owned by the separate web/signaling repo — start/verify them per that repo's
+docs. Once they're up:
 
 ```powershell
-Start-ScheduledTask glsplay-signaling ; Start-ScheduledTask glsplay-web
 Invoke-RestMethod http://localhost:8080/health          # {"peers":0,...}
 ```
 
@@ -389,6 +409,10 @@ C:\glsplay\apps\host\build\bin\Release\glsplay-host.exe `
 ---
 
 ## 9. Problems & solutions (everything we hit)
+
+> Several entries below cite `apps/web/...` / `apps/signaling/...` source paths in
+> their "Fixed in code" notes. Those files moved to the separate web/signaling
+> repo — the paths are kept as historical record of where each fix landed.
 
 ### 9.1 Signaling "loops continuously" / broker log spam
 **Cause:** two browser tabs in the same room. The broker's `seatPeer` always
@@ -586,13 +610,16 @@ they don't relaunch mid-build; re-enable after.
 | `vm-scripts/check-environment.ps1` | Post-setup validation. Run from the console session. |
 | `vm-scripts/fetch-deps.ps1` | Downloads / points at the host build dependencies. |
 | `docs/BUILD-HOST.md` | Host build prerequisites and known friction. |
-| `docs/RUNBOOK.md` | Original laptop↔VM control-plane bring-up (pre-headless-automation). |
+| `docs/RUNBOOK.md` | Original laptop↔VM control-plane bring-up (pre-headless-automation). Describes the broker + web client, which now live in the separate web/signaling repo. |
 
 ### Scheduled tasks (created by `setup-headless.ps1`)
-`glsplay-signaling`, `glsplay-web` — AtStartup, SYSTEM.
 `glsplay-host` — on-demand, `maranmani_t99`.
 `glsplay-reclaim` — Session RemoteDisconnect, SYSTEM.
+`glsplay-signaling`, `glsplay-web` — **MOVED**: AtStartup/SYSTEM tasks, now
+registered from the separate web/signaling repo (the loop that created them in
+`setup-headless.ps1` §3 is commented out).
 
 ### Logs
 `C:\glsplay\host.log` (+ `.prev`, `.res`) · `C:\glsplay\reclaim-console.log` ·
-broker: stdout of the `glsplay-signaling` task · `curl http://localhost:8080/health`.
+broker: stdout of the `glsplay-signaling` task (web/signaling repo) ·
+`curl http://localhost:8080/health`.

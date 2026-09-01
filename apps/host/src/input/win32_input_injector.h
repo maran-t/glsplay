@@ -24,7 +24,8 @@ class Win32InputInjector {
   // dx and dy are raw deltas from the browser's Pointer Lock movementX/Y.
   void MouseMoveRelative(int16_t dx, int16_t dy);
 
-  // x and y are normalised 0..32767 across the virtual desktop.
+  // x and y are normalised 0..32767 within the captured output (0 = left/top
+  // edge, 32767 = right/bottom edge of the monitor being streamed).
   void MouseMoveAbsolute(int16_t x, int16_t y);
 
   void MouseButton(uint8_t button, bool down);
@@ -47,6 +48,22 @@ class Win32InputInjector {
   std::atomic<int32_t> bounds_top_{0};
   std::atomic<int32_t> bounds_width_{0};   // 0 until SetCaptureBounds: fall
   std::atomic<int32_t> bounds_height_{0};  // back to the whole virtual desktop
+
+  // Where we believe the pointer is, in virtual-desktop pixels, integrated from
+  // the deltas we inject. Relative moves are clamped against this *before*
+  // injection, so the pointer never crosses the captured-monitor edge and no
+  // absolute SetCursorPos snap is needed in the hot path. Re-anchored from
+  // GetCursorPos out of band (not right after an async SendInput, which races
+  // the OS applying the move) every kReanchorEvery events, or when it has
+  // diverged far enough that something else must have moved the pointer.
+  // Only MouseMoveRelative touches these, and all input arrives on the one
+  // libwebrtc network thread, so no lock is needed.
+  static constexpr int kReanchorEvery = 30;
+  static constexpr int64_t kReanchorDivergePx = 24;
+  bool have_pos_ = false;
+  int64_t pos_x_ = 0;
+  int64_t pos_y_ = 0;
+  int reanchor_countdown_ = 0;
 
   // Windows mouse settings saved at construction and restored on destruction:
   // acceleration curve (SPI_*MOUSE, 3 ints) and pointer speed (SPI_*MOUSESPEED).

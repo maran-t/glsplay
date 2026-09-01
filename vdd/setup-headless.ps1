@@ -43,16 +43,20 @@ function New-StateTask($name, $file, $stateChange, $runAs, $args='') {
 }
 
 # --- 3. signaling + web at boot (so a reboot doesn't need you) ---------
-Info 'Signaling + web startup tasks'
-foreach ($svc in @(
-  @{ n='glsplay-signaling'; w='@glsplay/signaling' },
-  @{ n='glsplay-web';       w='@glsplay/web' })) {
-  $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"cd /d $repo && `"$npm`" run start -w $($svc.w)`""
-  $trg = New-ScheduledTaskTrigger -AtStartup
-  $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartInterval (New-TimeSpan -Minutes 1) -RestartCount 5
-  Register-ScheduledTask -TaskName $svc.n -Action $a -Trigger $trg -Settings $s -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
-  Ok "task '$($svc.n)' at startup"
-}
+# DISABLED: apps/signaling and apps/web moved to the separate glsplay-web repo,
+# so the @glsplay/signaling / @glsplay/web workspaces no longer exist in this
+# repo and `npm run start -w ...` would fail. Register these boot tasks from
+# the glsplay-web repo instead (with its own checkout path).
+# Info 'Signaling + web startup tasks'
+# foreach ($svc in @(
+#   @{ n='glsplay-signaling'; w='@glsplay/signaling' },
+#   @{ n='glsplay-web';       w='@glsplay/web' })) {
+#   $a = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"cd /d $repo && `"$npm`" run start -w $($svc.w)`""
+#   $trg = New-ScheduledTaskTrigger -AtStartup
+#   $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -RestartInterval (New-TimeSpan -Minutes 1) -RestartCount 5
+#   Register-ScheduledTask -TaskName $svc.n -Action $a -Trigger $trg -Settings $s -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+#   Ok "task '$($svc.n)' at startup"
+# }
 
 # --- 4. host + console-reclaim tasks ----------------------------------
 Info 'Host + console reclaim'

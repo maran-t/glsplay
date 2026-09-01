@@ -34,6 +34,32 @@ std::string Fixed(double value, int digits = 2) {
   return buffer;
 }
 
+std::string Base64(const std::vector<uint8_t>& in) {
+  static const char t[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve((in.size() + 2) / 3 * 4);
+  size_t i = 0;
+  for (; i + 2 < in.size(); i += 3) {
+    const uint32_t n = (static_cast<uint32_t>(in[i]) << 16) |
+                       (static_cast<uint32_t>(in[i + 1]) << 8) | in[i + 2];
+    out += t[(n >> 18) & 63];
+    out += t[(n >> 12) & 63];
+    out += t[(n >> 6) & 63];
+    out += t[n & 63];
+  }
+  if (i < in.size()) {
+    uint32_t n = static_cast<uint32_t>(in[i]) << 16;
+    const bool two = (i + 1) < in.size();
+    if (two) n |= static_cast<uint32_t>(in[i + 1]) << 8;
+    out += t[(n >> 18) & 63];
+    out += t[(n >> 12) & 63];
+    out += two ? t[(n >> 6) & 63] : '=';
+    out += '=';
+  }
+  return out;
+}
+
 #ifdef GLSPLAY_HAVE_NVML
 class NvmlProbe {
  public:
@@ -97,11 +123,73 @@ void HostStatsReporter::Run() {
   // still leaves evidence of whether capture and encode were healthy.
   int ticks = 0;
 
-  // The cursor is composited into the video by the capture path, so there is
-  // nothing to push here - this loop only emits the 1 Hz host-stats message.
+  // The client draws the cursor itself, so shape and visibility changes are
+  // pushed as they happen rather than on the 1 Hz stats cadence.
+  std::vector<uint8_t> last_shape;
+  uint32_t last_shape_type = 0xFFFFFFFFu;
+  uint32_t last_w = 0;
+  uint32_t last_h = 0;
+  int last_visible = -1;
+  int32_t last_x = INT32_MIN;
+  int32_t last_y = INT32_MIN;
+
+  auto emit_cursor = [&]() {
+    if (!capture_) return;
+    const CursorState cur = capture_->cursor_snapshot();
+    const bool shape_changed =
+        cur.shape != last_shape || cur.shape_type != last_shape_type;
+    const bool vis_changed = static_cast<int>(cur.visible) != last_visible;
+    const bool pos_changed = cur.x != last_x || cur.y != last_y;
+    if (!shape_changed && !vis_changed && !pos_changed) return;
+
+    std::string msg = "{\"type\":\"cursor\",\"visible\":";
+    msg += cur.visible ? "true" : "false";
+    msg += ",\"x\":" + std::to_string(cur.x);
+    msg += ",\"y\":" + std::to_string(cur.y);
+    msg += ",\"hotspotX\":" + std::to_string(cur.hotspot_x);
+    msg += ",\"hotspotY\":" + std::to_string(cur.hotspot_y);
+    if (shape_changed) {
+      std::vector<uint8_t> rgba;
+      uint32_t w = 0;
+      uint32_t h = 0;
+      if (DecodeCursorRgba(cur, &rgba, &w, &h)) {
+        msg += ",\"width\":" + std::to_string(w);
+        msg += ",\"height\":" + std::to_string(h);
+        msg += ",\"rgbaBase64\":\"" + Base64(rgba) + "\"";
+        last_w = w;
+        last_h = h;
+      } else {
+        msg += ",\"width\":0,\"height\":0";
+      }
+      last_shape = cur.shape;
+      last_shape_type = cur.shape_type;
+    } else {
+      msg += ",\"width\":" + std::to_string(last_w);
+      msg += ",\"height\":" + std::to_string(last_h);
+    }
+    msg += '}';
+    session_->SendControl(msg);
+    last_visible = static_cast<int>(cur.visible);
+    last_x = cur.x;
+    last_y = cur.y;
+  };
+
+  int elapsed_ms = 0;
+  // The cursor overlay is drawn client-side from these position updates, so it
+  // is only as smooth as this loop is fast. Poll at ~60Hz to match the video;
+  // emit_cursor() early-returns when nothing moved, so a still pointer costs
+  // nothing and a moving one sends ~120-byte position messages.
+  constexpr int kTickMs = 16;
+
   while (running_.load()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms_));
+    std::this_thread::sleep_for(std::chrono::milliseconds(kTickMs));
     if (!running_.load()) break;
+
+    emit_cursor();
+
+    elapsed_ms += kTickMs;
+    if (elapsed_ms < interval_ms_) continue;
+    elapsed_ms = 0;
 
     const auto capture_stats = capture_->stats();
     const auto input_stats = input_->stats();

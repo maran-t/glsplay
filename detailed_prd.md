@@ -145,6 +145,13 @@ $$\mathbf{T_{\text{Total}} = 1\text{ms} + 10\text{ms} + 6\text{ms} + 2\text{ms} 
 
 ## 6. Project Directory Structure
 
+> **Note (repo split):** the layout below is the original single-repo design. The
+> code has since been split: `web/`, `signaling/` and the TypeScript half of the
+> protocol now live in a separate web/signaling/protocol repo, while this `glsplay`
+> repo is host-only — `server/` (as `apps/host/`, native C++), the VM scripts, and
+> `packages/protocol/include/glsplay_input.h` (the one protocol header the host
+> compiles). The subsystem specs in §4 are unaffected.
+
 ```text
 cloud-gaming-poc/
 ├── web/                               # Next.js 14 WebRTC Client & HUD

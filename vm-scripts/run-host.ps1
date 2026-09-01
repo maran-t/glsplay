@@ -14,7 +14,7 @@
 [CmdletBinding()]
 param(
   [string]$Room = 'poc',
-  [string]$SignalingUrl = 'ws://localhost:8080',
+  [string]$SignalingUrl = 'wss://play.resrve.xyz/ws',
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
   [switch]$NoAudio = $true

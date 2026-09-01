@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <vector>
 
 #include "glsplay_input.h"
@@ -93,42 +94,103 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
 
-  // Plain relative SendInput. With acceleration and the speed slider disabled
-  // in the constructor this is a verbatim 1:1 move, and unlike SetCursorPos it
-  // registers as real mouse activity - so Windows keeps the pointer shown and
-  // Desktop Duplication keeps reporting it, which is what the compositor draws.
-  INPUT input{};
-  input.type = INPUT_MOUSE;
-  input.mi.dx = dx;
-  input.mi.dy = dy;
-  input.mi.dwFlags = MOUSEEVENTF_MOVE;
-  Send(&input, 1);
+  auto inject = [](int mx, int my) {
+    if (mx == 0 && my == 0) return;
+    // Relative SendInput. With acceleration and the speed slider disabled in the
+    // constructor this is a verbatim 1:1 move, and unlike SetCursorPos it
+    // registers as real mouse activity - so Windows keeps the pointer shown and
+    // Desktop Duplication keeps reporting it.
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dx = mx;
+    input.mi.dy = my;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    Send(&input, 1);
+  };
 
-  // Relative motion has no bound of its own; nudge it back onto the captured
-  // monitor so a long sweep can't park the pointer on the L4 phantom head.
   const int left = bounds_left_.load(std::memory_order_relaxed);
   const int top = bounds_top_.load(std::memory_order_relaxed);
   const int width = bounds_width_.load(std::memory_order_relaxed);
   const int height = bounds_height_.load(std::memory_order_relaxed);
-  if (width <= 0 || height <= 0) return;
 
-  POINT p{};
-  if (!GetCursorPos(&p)) return;
-  const LONG cx = std::clamp<LONG>(p.x, left, left + width - 1);
-  const LONG cy = std::clamp<LONG>(p.y, top, top + height - 1);
-  if (cx != p.x || cy != p.y) SetCursorPos(cx, cy);
+  // No captured-monitor rect yet: fall back to a plain verbatim relative move.
+  if (width <= 0 || height <= 0) {
+    inject(dx, dy);
+    return;
+  }
+
+  // Re-anchor to the real pointer out of band - on first use, every
+  // kReanchorEvery events, or whenever it has diverged far enough that
+  // something else (a game recentre, another input path) must have moved it.
+  // Reading GetCursorPos here rather than straight after a SendInput avoids
+  // racing the OS as it applies the injected move.
+  if (!have_pos_ || --reanchor_countdown_ <= 0) {
+    POINT p{};
+    if (GetCursorPos(&p)) {
+      if (!have_pos_ || std::llabs(p.x - pos_x_) > kReanchorDivergePx ||
+          std::llabs(p.y - pos_y_) > kReanchorDivergePx) {
+        pos_x_ = p.x;
+        pos_y_ = p.y;
+      }
+      have_pos_ = true;
+    }
+    reanchor_countdown_ = kReanchorEvery;
+  }
+
+  // Clamp the target against our believed position *before* injecting, so the
+  // pointer never crosses the edge - no stale-read decision, no absolute snap.
+  const int64_t min_x = left;
+  const int64_t max_x = static_cast<int64_t>(left) + width - 1;
+  const int64_t min_y = top;
+  const int64_t max_y = static_cast<int64_t>(top) + height - 1;
+
+  const int64_t want_x = std::clamp<int64_t>(pos_x_ + dx, min_x, max_x);
+  const int64_t want_y = std::clamp<int64_t>(pos_y_ + dy, min_y, max_y);
+
+  const int inject_dx = static_cast<int>(want_x - pos_x_);
+  const int inject_dy = static_cast<int>(want_y - pos_y_);
+  pos_x_ = want_x;
+  pos_y_ = want_y;
+
+  inject(inject_dx, inject_dy);
 }
 
 void Win32InputInjector::MouseMoveAbsolute(int16_t x, int16_t y) {
   if (!mouse_enabled_) return;
 
+  // Wire x/y are 0..32767 normalised *within the captured output* - the client
+  // maps its pointer into the letterboxed video, not the whole virtual desktop.
+  // Turn that into a pixel on the captured monitor, then into the 0..65535
+  // virtual-desktop space SendInput's ABSOLUTE|VIRTUALDESK mode expects.
+  const double nx = std::clamp(static_cast<double>(x) / 32767.0, 0.0, 1.0);
+  const double ny = std::clamp(static_cast<double>(y) / 32767.0, 0.0, 1.0);
+
+  const int vs_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int vs_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int vs_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+  const int vs_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+  if (vs_w <= 1 || vs_h <= 1) return;
+
+  const int bl = bounds_left_.load(std::memory_order_relaxed);
+  const int bt = bounds_top_.load(std::memory_order_relaxed);
+  const int bw = bounds_width_.load(std::memory_order_relaxed);
+  const int bh = bounds_height_.load(std::memory_order_relaxed);
+
+  // Fall back to the whole virtual desktop if the capture bounds were never set.
+  double px;
+  double py;
+  if (bw > 0 && bh > 0) {
+    px = bl + nx * (bw - 1);
+    py = bt + ny * (bh - 1);
+  } else {
+    px = vs_left + nx * (vs_w - 1);
+    py = vs_top + ny * (vs_h - 1);
+  }
+
   INPUT input{};
   input.type = INPUT_MOUSE;
-  // The absolute coordinate space is always 0..65535 across the virtual
-  // desktop. The wire format carries 0..32767 to fit a signed 16-bit field,
-  // so it is scaled back up here.
-  input.mi.dx = static_cast<LONG>(x) * 2;
-  input.mi.dy = static_cast<LONG>(y) * 2;
+  input.mi.dx = static_cast<LONG>((px - vs_left) * 65535.0 / (vs_w - 1) + 0.5);
+  input.mi.dy = static_cast<LONG>((py - vs_top) * 65535.0 / (vs_h - 1) + 0.5);
   input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
   Send(&input, 1);
 }

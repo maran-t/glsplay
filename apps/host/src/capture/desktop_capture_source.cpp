@@ -49,11 +49,8 @@ bool DesktopCaptureSource::Start(int adapter_index, int output_index, int target
     return false;
   }
 
-  // Blend the OS cursor straight into the captured frames. If this fails the
-  // stream just has no pointer - better than aborting capture.
-  if (!cursor_compositor_.Initialise(duplicator_->device())) {
-    LOG_WARN << "cursor compositor unavailable - stream will have no pointer";
-  }
+  // The cursor is streamed as metadata over the control channel and drawn by
+  // the client, so nothing is composited into the video here.
 
   running_.store(true);
   state_ = webrtc::MediaSourceInterface::kLive;
@@ -168,9 +165,9 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
       cursor_hide_frames_ = 0;
     } else if (!sticky_cursor_.shape.empty() && cursor_hide_frames_ < 90) {
       // DXGI reports Visible=false in bursts on this headless VDD even while
-      // the pointer is plainly in use, which blinks the composited cursor.
-      // Keep drawing the last good one for up to ~1.5s (the pointer is clamped
-      // to the captured monitor, so it cannot really have left the frame).
+      // the pointer is plainly in use, which would strobe the client's pointer.
+      // Report the last good one for up to ~1.5s (the pointer is clamped to the
+      // captured monitor, so it cannot really have left the frame).
       ++cursor_hide_frames_;
       cursor = sticky_cursor_;
       cursor.visible = true;
@@ -180,35 +177,9 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
       cursor_state_ = cursor;
     }
 
-    ID3D11Texture2D* out_texture = captured.texture;
-
-    // Composite the cursor onto a private copy so `captured.texture` stays a
-    // clean desktop image - otherwise a repeat frame blends the cursor again
-    // on top of the previous blend.
-    if (cursor_compositor_.ready()) {
-      if (!composited_texture_ || composited_w_ != width || composited_h_ != height) {
-        D3D11_TEXTURE2D_DESC desc{};
-        captured.texture->GetDesc(&desc);
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        desc.CPUAccessFlags = 0;
-        desc.MiscFlags = 0;
-        composited_texture_.Reset();
-        if (SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &composited_texture_))) {
-          composited_w_ = width;
-          composited_h_ = height;
-        }
-      }
-      if (composited_texture_) {
-        Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx;
-        device->GetImmediateContext(&ctx);
-        ctx->CopyResource(composited_texture_.Get(), captured.texture);
-        cursor_compositor_.Draw(composited_texture_.Get(), cursor);
-        out_texture = composited_texture_.Get();
-      }
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture(out_texture);
+    // The cursor is never blended into the frame; `captured.texture` is handed
+    // to the encoder as a clean desktop image and the client draws the pointer.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture(captured.texture);
     auto buffer = D3D11FrameBuffer::Create(texture, device, width, height);
 
     webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
