@@ -15,6 +15,8 @@
 #include "util/log.h"
 
 #ifdef GLSPLAY_HAVE_NVML
+#include <windows.h>
+
 #include <nvml.h>
 #endif
 
@@ -61,32 +63,61 @@ std::string Base64(const std::vector<uint8_t>& in) {
 }
 
 #ifdef GLSPLAY_HAVE_NVML
+// nvml.dll ships with the NVIDIA driver, but nvml.lib (the import library) only
+// comes with the full CUDA Toolkit. Resolve the handful of entry points we need
+// at runtime instead - same pattern as nvenc_session.cpp with nvEncodeAPI64.dll.
 class NvmlProbe {
  public:
   NvmlProbe() {
-    if (nvmlInit_v2() != NVML_SUCCESS) return;
-    if (nvmlDeviceGetHandleByIndex_v2(0, &device_) != NVML_SUCCESS) return;
+    module_ = LoadLibraryW(L"nvml.dll");
+    if (!module_) return;
+    init_ = reinterpret_cast<PfnInit>(GetProcAddress(module_, "nvmlInit_v2"));
+    shutdown_ =
+        reinterpret_cast<PfnShutdown>(GetProcAddress(module_, "nvmlShutdown"));
+    get_handle_ = reinterpret_cast<PfnGetHandle>(
+        GetProcAddress(module_, "nvmlDeviceGetHandleByIndex_v2"));
+    get_util_ = reinterpret_cast<PfnGetUtil>(
+        GetProcAddress(module_, "nvmlDeviceGetUtilizationRates"));
+    get_encoder_util_ = reinterpret_cast<PfnGetEncoderUtil>(
+        GetProcAddress(module_, "nvmlDeviceGetEncoderUtilization"));
+    if (!init_ || !get_handle_ || !get_util_) return;
+    if (init_() != NVML_SUCCESS) return;
+    if (get_handle_(0, &device_) != NVML_SUCCESS) return;
     ready_ = true;
   }
   ~NvmlProbe() {
-    if (ready_) nvmlShutdown();
+    if (ready_ && shutdown_) shutdown_();
+    if (module_) FreeLibrary(module_);
   }
 
   void Sample(double* gpu_percent, double* encoder_percent) {
     if (!ready_) return;
     nvmlUtilization_t util{};
-    if (nvmlDeviceGetUtilizationRates(device_, &util) == NVML_SUCCESS) {
+    if (get_util_(device_, &util) == NVML_SUCCESS) {
       *gpu_percent = util.gpu;
     }
     unsigned int encoder_util = 0;
     unsigned int sampling_us = 0;
-    if (nvmlDeviceGetEncoderUtilization(device_, &encoder_util, &sampling_us) ==
-        NVML_SUCCESS) {
+    if (get_encoder_util_ &&
+        get_encoder_util_(device_, &encoder_util, &sampling_us) == NVML_SUCCESS) {
       *encoder_percent = encoder_util;
     }
   }
 
  private:
+  using PfnInit = nvmlReturn_t (*)();
+  using PfnShutdown = nvmlReturn_t (*)();
+  using PfnGetHandle = nvmlReturn_t (*)(unsigned int, nvmlDevice_t*);
+  using PfnGetUtil = nvmlReturn_t (*)(nvmlDevice_t, nvmlUtilization_t*);
+  using PfnGetEncoderUtil =
+      nvmlReturn_t (*)(nvmlDevice_t, unsigned int*, unsigned int*);
+
+  HMODULE module_ = nullptr;
+  PfnInit init_ = nullptr;
+  PfnShutdown shutdown_ = nullptr;
+  PfnGetHandle get_handle_ = nullptr;
+  PfnGetUtil get_util_ = nullptr;
+  PfnGetEncoderUtil get_encoder_util_ = nullptr;
   nvmlDevice_t device_{};
   bool ready_ = false;
 };
