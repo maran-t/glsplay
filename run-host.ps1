@@ -18,11 +18,17 @@ param(
   [string]$LogPath = 'C:\glsplay\host.log',
   [string]$RepoRoot = 'C:\glsplay',
   # DXGI output to duplicate on the NVIDIA L4 adapter:
-  #   0 = the L4's own phantom head (~1280x800)
-  #   1 = the Virtual Display Driver monitor (1920x1080) <-- the one we want
-  # host.log logs "DXGI adapters: [0] NVIDIA L4 outputs=2" - if that count or
-  # ordering ever changes, revisit this.
-  [string]$Output = '1',
+  #   0 = the 1920x1080 desktop <-- the one we want
+  #   1 = the L4's own phantom head (~1280x800)
+  #
+  # This ordering is not stable. DXGI re-enumerates the adapter's outputs when
+  # the display layout changes, and the primary display generally lands on
+  # output 0 - so marking the 1080p monitor primary (which is what makes a game
+  # take exclusive fullscreen on the captured display) swapped 0 and 1 from what
+  # they used to be. The symptom is quiet: the stream just comes up at the wrong
+  # resolution. Check "DXGI duplication ready: NVIDIA L4 <w>x<h>" in host.log
+  # after any display change, and flip this if it reads the wrong size.
+  [string]$Output = '0',
   # Default to audio ON. Pass -NoAudio to disable (e.g. on a VM with no
   # virtual audio endpoint installed).
   [switch]$NoAudio = $false
