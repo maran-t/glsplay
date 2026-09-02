@@ -21,6 +21,21 @@ class Win32InputInjector {
   // never leave it on another head. Called once at startup, before any input.
   void SetCaptureBounds(int left, int top, int width, int height);
 
+  // Which pointer mode the client is in, from its set-pointer-mode control
+  // message. It matters because the capture-bounds clamp above is only right
+  // for one of them:
+  //
+  //  - absolute (desktop): the client derives deltas from the real pointer's
+  //    position over the video, and needs both pointers to reach their edges
+  //    together or they drift apart. Clamp.
+  //
+  //  - relative (Pointer Lock / mouselook): the game wants raw motion forever.
+  //    Clamping means that once the OS cursor pins to an edge the injected
+  //    delta becomes zero, the game sees nothing, and the camera stops turning
+  //    mid-sweep. Do not clamp - where the OS cursor sits is irrelevant, the
+  //    game is reading deltas.
+  void SetPointerRelative(bool relative);
+
   // dx and dy are raw deltas from the browser's Pointer Lock movementX/Y.
   void MouseMoveRelative(int16_t dx, int16_t dy);
 
@@ -48,6 +63,11 @@ class Win32InputInjector {
   std::atomic<int32_t> bounds_top_{0};
   std::atomic<int32_t> bounds_width_{0};   // 0 until SetCaptureBounds: fall
   std::atomic<int32_t> bounds_height_{0};  // back to the whole virtual desktop
+
+  // False until the client says otherwise. Absolute is the mode a session opens
+  // in, and it is the safe default: clamping a mouselook stream is a visible
+  // bug, letting the desktop pointer wander onto another head is merely untidy.
+  std::atomic<bool> pointer_relative_{false};
 
   // Where we believe the pointer is, in virtual-desktop pixels, integrated from
   // the deltas we inject. Relative moves are clamped against this *before*
