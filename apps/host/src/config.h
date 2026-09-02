@@ -33,7 +33,11 @@ struct VideoConfig {
   // minimum is always 0: render as soon as possible. Leaving a small window
   // rather than pinning 0/0 lets Chrome still absorb genuine network jitter
   // instead of juddering on every late packet.
-  int playout_delay_max_ms = 50;
+  //
+  // 50ms was the first ceiling tried; Chrome settled at 33ms inside it, so the
+  // window itself was the binding constraint rather than the network. 20ms is
+  // ~1 frame at 60fps, which is where Moonlight and Parsec effectively sit.
+  int playout_delay_max_ms = 20;
 
   // Which DXGI adapter and output to duplicate. Defaults pick the first
   // NVIDIA adapter and its first attached output.
