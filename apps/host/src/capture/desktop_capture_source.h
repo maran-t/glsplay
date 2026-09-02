@@ -33,7 +33,8 @@ struct CaptureStats {
   double captured_fps = 0.0;
   double mean_capture_ms = 0.0;
   uint64_t frames = 0;
-  uint64_t dropped = 0;
+  uint64_t dropped = 0;   // captured but not sent, to hold the outbound rate at
+                          // target_fps when the display presents faster
   uint64_t repeats = 0;   // idle frames resent because nothing changed
   uint64_t reinits = 0;   // recoveries from DXGI_ERROR_ACCESS_LOST
 };

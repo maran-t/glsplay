@@ -82,8 +82,21 @@ Microsoft::WRL::ComPtr<ID3D11Device> DesktopCaptureSource::device() const {
 }
 
 void DesktopCaptureSource::CaptureLoop(int target_fps) {
-  const auto frame_interval_us = std::chrono::microseconds(1000000 / std::max(1, target_fps));
-  auto next_deadline = std::chrono::steady_clock::now();
+  const int64_t interval_us = 1000000 / std::max(1, target_fps);
+  const auto frame_interval = std::chrono::microseconds(interval_us);
+  auto next_wake = std::chrono::steady_clock::now();
+
+  // Outbound rate gate. send_deadline_us advances by exactly one interval per
+  // emitted frame, so the long-run send rate is target_fps measured on our own
+  // steady clock rather than on the virtual display's present clock. If the two
+  // ever diverge, the surplus frames would otherwise pile up in the receiver's
+  // jitter buffer as latency; a frame that arrives ahead of the deadline is
+  // dropped here instead, which costs one ~16 ms-old desktop image.
+  //
+  // Measured on the MTT VDD this fires almost never (1 drop in a 4 minute
+  // session), so it is a guard rather than a fix - the receiver-side buffer is
+  // bounded by the playout-delay extension the encoder stamps, not by this.
+  int64_t send_deadline_us = 0;  // 0 until the first frame primes it
 
   int64_t fps_window_start = NowUs();
   uint64_t fps_window_frames = 0;
@@ -101,7 +114,7 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
     // going silent makes the browser's jitter buffer grow, and the first
     // frame after the pause then arrives visibly late.
     const CaptureStatus status = duplicator_->AcquireFrame(
-        static_cast<uint32_t>(frame_interval_us.count() / 1000), &captured);
+        static_cast<uint32_t>(interval_us / 1000), &captured);
 
     if (status == CaptureStatus::kAccessLost) {
       reinits_.fetch_add(1, std::memory_order_relaxed);
@@ -149,8 +162,8 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
     }
 
     if (captured.texture == nullptr) {
-      std::this_thread::sleep_until(next_deadline);
-      next_deadline += frame_interval_us;
+      std::this_thread::sleep_until(next_wake);
+      next_wake += frame_interval;
       continue;
     }
 
@@ -182,19 +195,37 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture(captured.texture);
     auto buffer = D3D11FrameBuffer::Create(texture, device, width, height);
 
-    webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
-                                   .set_video_frame_buffer(buffer)
-                                   .set_timestamp_us(capture_start_us)
-                                   .set_rotation(webrtc::kVideoRotation_0)
-                                   .build();
-    Broadcast(frame);
+    const int64_t emit_us = NowUs();
+    if (send_deadline_us == 0) send_deadline_us = emit_us;
 
-    const double capture_ms = static_cast<double>(NowUs() - capture_start_us) / 1000.0;
-    const double previous = mean_capture_ms_.load(std::memory_order_relaxed);
-    mean_capture_ms_.store(previous * 0.9 + capture_ms * 0.1, std::memory_order_relaxed);
+    if (emit_us + 1000 < send_deadline_us) {
+      // Ahead of schedule: the present clock is running faster than our target
+      // rate. Drop this frame rather than let the client's jitter buffer bank
+      // the surplus as latency.
+      dropped_.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
+                                     .set_video_frame_buffer(buffer)
+                                     .set_timestamp_us(emit_us)
+                                     .set_rotation(webrtc::kVideoRotation_0)
+                                     .build();
+      Broadcast(frame);
 
-    frames_.fetch_add(1, std::memory_order_relaxed);
-    ++fps_window_frames;
+      const double capture_ms =
+          static_cast<double>(NowUs() - capture_start_us) / 1000.0;
+      const double previous = mean_capture_ms_.load(std::memory_order_relaxed);
+      mean_capture_ms_.store(previous * 0.9 + capture_ms * 0.1,
+                             std::memory_order_relaxed);
+
+      frames_.fetch_add(1, std::memory_order_relaxed);
+      ++fps_window_frames;
+
+      // Drift-accurate: one interval per emitted frame. After a real stall the
+      // deadline can trail far behind 'now'; clamp it to one interval back so
+      // capture resumes at the target rate instead of bursting the backlog.
+      send_deadline_us += interval_us;
+      if (send_deadline_us < emit_us - interval_us) send_deadline_us = emit_us;
+    }
 
     const int64_t now_us = NowUs();
     if (now_us - fps_window_start >= 1000000) {
@@ -205,13 +236,13 @@ void DesktopCaptureSource::CaptureLoop(int target_fps) {
       fps_window_start = now_us;
     }
 
-    // Pace to the target rate. If a frame took longer than its slot, reset the
-    // deadline rather than trying to catch up - bunching frames together after
-    // a stall makes the jitter worse, not better.
-    next_deadline += frame_interval_us;
+    // CPU pacing only - stops the loop from spinning when AcquireFrame returns a
+    // new frame immediately. The outbound rate is governed by send_deadline_us
+    // above, not here.
+    next_wake += frame_interval;
     const auto now = std::chrono::steady_clock::now();
-    if (next_deadline < now) next_deadline = now;
-    else std::this_thread::sleep_until(next_deadline);
+    if (next_wake < now) next_wake = now;
+    else std::this_thread::sleep_until(next_wake);
   }
 
   running_.store(false);
