@@ -576,6 +576,11 @@ void PeerSession::OnMessage(const webrtc::DataBuffer& buffer) {
   } else if (*type == "set-bitrate") {
     const auto kbps = json::GetInt(text, "bitrateKbps");
     if (kbps && *kbps > 0) LOG_INFO << "client requested " << *kbps << " kbps";
+  } else if (*type == "set-ultra-mode") {
+    // Sent when the user presses the button, not on every Pointer Lock change -
+    // see Win32InputInjector::SetUltraMode for why that distinction matters.
+    const auto enabled = json::GetBool(text, "enabled");
+    if (enabled && input_) input_->SetUltraMode(*enabled);
   }
 }
 

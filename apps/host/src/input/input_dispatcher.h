@@ -40,6 +40,11 @@ class InputDispatcher {
   // Lifts every held key, button and gamepad. Called on peer disconnect.
   void ReleaseAll();
 
+  // Mirrors the client's set-ultra-mode onto the injector. See
+  // Win32InputInjector::SetUltraMode for what it changes, and why it is a
+  // manual toggle rather than something derived from Pointer Lock.
+  void SetUltraMode(bool enabled);
+
   InputStats stats() const;
 
   IGamepadSink* gamepad() const { return gamepad_.get(); }

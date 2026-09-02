@@ -147,8 +147,17 @@ void InputDispatcher::HandleMessage(const uint8_t* data, size_t size) {
   }
 }
 
+void InputDispatcher::SetUltraMode(bool enabled) {
+  if (injector_) injector_->SetUltraMode(enabled);
+}
+
 void InputDispatcher::ReleaseAll() {
-  if (injector_) injector_->ReleaseAll();
+  if (injector_) {
+    injector_->ReleaseAll();
+    // A client that dropped mid-game would otherwise leave the next session's
+    // desktop pointer unclamped until it happened to toggle the mode itself.
+    injector_->SetUltraMode(false);
+  }
   if (gamepad_) gamepad_->ReleaseAll();
 }
 

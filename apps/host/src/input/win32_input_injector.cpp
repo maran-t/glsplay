@@ -90,6 +90,12 @@ void Win32InputInjector::SetCaptureBounds(int left, int top, int width, int heig
   bounds_height_.store(height, std::memory_order_relaxed);
 }
 
+void Win32InputInjector::SetUltraMode(bool enabled) {
+  if (ultra_mode_.exchange(enabled, std::memory_order_relaxed) == enabled) return;
+  LOG_INFO << "ultra mode " << (enabled ? "on - relative deltas injected verbatim"
+                                        : "off - relative deltas clamped to the capture");
+}
+
 void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
@@ -107,6 +113,22 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
     input.mi.dwFlags = MOUSEEVENTF_MOVE;
     Send(&input, 1);
   };
+
+  // Ultra mode: verbatim, never clamped. See SetUltraMode for why the clamp is
+  // fatal to mouselook. Everything below this point is the desktop path and is
+  // untouched by the toggle.
+  const bool ultra = ultra_mode_.load(std::memory_order_relaxed);
+  if (ultra != was_ultra_) {
+    was_ultra_ = ultra;
+    // Coming back out, pos_ is stale by the whole in-game sweep. Drop it so the
+    // block below re-anchors from GetCursorPos on this very event rather than
+    // clamping against a value that has not tracked anything for minutes.
+    if (!ultra) have_pos_ = false;
+  }
+  if (ultra) {
+    inject(dx, dy);
+    return;
+  }
 
   const int left = bounds_left_.load(std::memory_order_relaxed);
   const int top = bounds_top_.load(std::memory_order_relaxed);

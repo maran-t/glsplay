@@ -21,6 +21,26 @@ class Win32InputInjector {
   // never leave it on another head. Called once at startup, before any input.
   void SetCaptureBounds(int left, int top, int width, int height);
 
+  // Ultra mode, toggled by the client's set-ultra-mode control message when the
+  // user starts playing. While on, relative deltas are injected verbatim
+  // instead of being clamped to the captured monitor.
+  //
+  // The clamp exists so the desktop pointer cannot wander onto a head the user
+  // cannot see, and for desktop use it is right. For mouselook it is fatal: at
+  // a screen edge the clamped delta is zero, the zero is filtered out before
+  // SendInput is ever called, and so nothing reaches Windows' raw input stream
+  // at all - a game reading WM_INPUT stops turning about one screen-width into
+  // a sweep, even though the motion would have been delivered regardless of
+  // where the cursor sat.
+  //
+  // Deliberately a manual toggle rather than something derived from Pointer
+  // Lock. Control messages travel on a different DataChannel from input, and
+  // SCTP orders nothing between two streams; a mode that flipped on every lock
+  // transition raced the deltas it applied to. Flipped twice a session by a
+  // button press, while the mouse is not being swept, that race has no window
+  // that matters.
+  void SetUltraMode(bool enabled);
+
   // dx and dy are raw deltas from the browser's Pointer Lock movementX/Y.
   void MouseMoveRelative(int16_t dx, int16_t dy);
 
@@ -64,6 +84,15 @@ class Win32InputInjector {
   int64_t pos_x_ = 0;
   int64_t pos_y_ = 0;
   int reanchor_countdown_ = 0;
+
+  // Set from any thread (the control message arrives on the network thread,
+  // ReleaseAll can come from the signaling thread on disconnect), so atomic.
+  std::atomic<bool> ultra_mode_{false};
+  // Read only by MouseMoveRelative, to spot the moment ultra mode turns off:
+  // pos_ tracks nothing while deltas bypass the clamped path, so it is stale by
+  // however far the pointer travelled in game and must be re-anchored once
+  // before it is trusted again.
+  bool was_ultra_ = false;
 
   // Windows mouse settings saved at construction and restored on destruction:
   // acceleration curve (SPI_*MOUSE, 3 ints) and pointer speed (SPI_*MOUSESPEED).
