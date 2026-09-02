@@ -107,7 +107,8 @@ bool PeerSession::Initialise() {
     return false;
   }
 
-  auto encoder_factory = std::make_unique<NvencEncoderFactory>(device);
+  auto encoder_factory = std::make_unique<NvencEncoderFactory>(
+      device, config_.video.playout_delay_max_ms);
   encoder_factory_ = encoder_factory.get();
 
   // The ADM must be created on the worker thread; libwebrtc asserts otherwise.
@@ -193,6 +194,36 @@ bool PeerSession::CreatePeerConnection() {
   if (!add_video.ok()) {
     LOG_ERROR << "AddTrack(video) failed: " << add_video.error().message();
     return false;
+  }
+
+  // Offer the playout-delay header extension. libwebrtc leaves it kStopped by
+  // default, and without it in the SDP the per-frame limits the encoder stamps
+  // are dropped before they reach the wire. This is the only bound on the
+  // receiver's jitter buffer that the receiver has to obey; the client-side
+  // jitterBufferTarget=0 is advisory and Chrome overrode it (100-170ms held).
+  for (const auto& transceiver : peer_->GetTransceivers()) {
+    if (transceiver->media_type() != webrtc::MediaType::VIDEO) continue;
+    auto extensions = transceiver->GetHeaderExtensionsToNegotiate();
+    bool found = false;
+    for (auto& extension : extensions) {
+      if (extension.uri != webrtc::RtpExtension::kPlayoutDelayUri) continue;
+      extension.direction = webrtc::RtpTransceiverDirection::kSendOnly;
+      found = true;
+      break;
+    }
+    if (!found) {
+      LOG_WARN << "playout-delay extension not offered by this libwebrtc build";
+      break;
+    }
+    const auto set = transceiver->SetHeaderExtensionsToNegotiate(extensions);
+    if (!set.ok()) {
+      LOG_WARN << "SetHeaderExtensionsToNegotiate(playout-delay) failed: "
+               << set.message();
+    } else {
+      LOG_INFO << "playout-delay extension offered (0-"
+               << config_.video.playout_delay_max_ms << "ms)";
+    }
+    break;
   }
 
   // Pin the send parameters. Without an explicit max, libwebrtc starts low and
@@ -296,6 +327,17 @@ void PeerSession::HandleAnswer(const std::string& sdp) {
     LOG_ERROR << "answer parse failed at '" << error.line << "': " << error.description;
     return;
   }
+  // Whether the client kept the playout-delay extension decides whether the
+  // per-frame limits the encoder stamps reach the wire at all. If it is absent
+  // they are silently discarded and the receiver goes back to sizing its own
+  // jitter buffer, so say so rather than leaving it to be discovered in a dump.
+  if (sdp.find(webrtc::RtpExtension::kPlayoutDelayUri) == std::string::npos) {
+    LOG_WARN << "client did not accept the playout-delay extension - receiver "
+                "jitter buffer is unbounded again";
+  } else {
+    LOG_INFO << "playout-delay extension negotiated";
+  }
+
   peer_->SetRemoteDescription(SetLocalObserver::Create("remote answer").get(), desc.release());
   LOG_INFO << "answer applied";
 }

@@ -25,7 +25,11 @@ class NvencVideoEncoder : public webrtc::VideoEncoder {
  public:
   // The D3D11 device must be the same one the capture source produces textures
   // on; NVENC cannot read a texture from a different device.
-  explicit NvencVideoEncoder(Microsoft::WRL::ComPtr<ID3D11Device> device);
+  //
+  // playout_delay_max_ms is stamped on every encoded frame as the upper bound
+  // of the playout-delay RTP header extension - see VideoConfig.
+  NvencVideoEncoder(Microsoft::WRL::ComPtr<ID3D11Device> device,
+                    int playout_delay_max_ms);
   ~NvencVideoEncoder() override;
 
   int InitEncode(const webrtc::VideoCodec* codec_settings,
@@ -43,6 +47,7 @@ class NvencVideoEncoder : public webrtc::VideoEncoder {
 
  private:
   Microsoft::WRL::ComPtr<ID3D11Device> device_;
+  int playout_delay_max_ms_ = 0;
 
   std::mutex mutex_;
   std::unique_ptr<NvencSession> session_;

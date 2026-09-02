@@ -21,7 +21,10 @@ class NvencVideoEncoder;
 
 class NvencEncoderFactory : public webrtc::VideoEncoderFactory {
  public:
-  explicit NvencEncoderFactory(Microsoft::WRL::ComPtr<ID3D11Device> device);
+  // playout_delay_max_ms is handed to every encoder this factory builds; see
+  // VideoConfig and NvencVideoEncoder.
+  NvencEncoderFactory(Microsoft::WRL::ComPtr<ID3D11Device> device,
+                      int playout_delay_max_ms);
   ~NvencEncoderFactory() override;
 
   std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override;
@@ -36,6 +39,7 @@ class NvencEncoderFactory : public webrtc::VideoEncoderFactory {
 
  private:
   Microsoft::WRL::ComPtr<ID3D11Device> device_;
+  int playout_delay_max_ms_ = 0;
   // Non-owning: libwebrtc owns the encoder it was handed.
   mutable NvencVideoEncoder* active_ = nullptr;
 };

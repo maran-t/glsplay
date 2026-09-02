@@ -1,6 +1,7 @@
 #include "encode/nvenc_video_encoder.h"
 
 #include "api/video/encoded_image.h"
+#include "api/video/video_timing.h"
 #include "rtc_base/ref_counted_object.h"
 
 #include "capture/d3d11_frame_buffer.h"
@@ -8,8 +9,10 @@
 
 namespace glsplay {
 
-NvencVideoEncoder::NvencVideoEncoder(Microsoft::WRL::ComPtr<ID3D11Device> device)
-    : device_(std::move(device)) {}
+NvencVideoEncoder::NvencVideoEncoder(Microsoft::WRL::ComPtr<ID3D11Device> device,
+                                     int playout_delay_max_ms)
+    : device_(std::move(device)),
+      playout_delay_max_ms_(std::max(0, playout_delay_max_ms)) {}
 
 NvencVideoEncoder::~NvencVideoEncoder() {
   Release();
@@ -114,6 +117,18 @@ int32_t NvencVideoEncoder::Encode(const webrtc::VideoFrame& frame,
   image.rotation_ = frame.rotation();
   image._frameType = packet.is_keyframe ? webrtc::VideoFrameType::kVideoFrameKey
                                         : webrtc::VideoFrameType::kVideoFrameDelta;
+
+  // Playout-delay RTP header extension (PRD section 5). This is the only way to
+  // bound the receiver's jitter buffer that the receiver must obey: the
+  // client-side jitterBufferTarget=0 hint is advisory, and Chrome was observed
+  // overriding it and holding 100-170ms. min=0 means "render as soon as you
+  // can"; the max leaves a small window so genuine network jitter is still
+  // absorbed rather than juddering. Requires the extension to be negotiated -
+  // PeerSession enables it on the video transceiver; without that this is
+  // silently dropped rather than sent.
+  image.SetPlayoutDelay(webrtc::VideoPlayoutDelay(
+      webrtc::TimeDelta::Zero(),
+      webrtc::TimeDelta::Millis(playout_delay_max_ms_)));
 
   webrtc::CodecSpecificInfo codec_specific;
   codec_specific.codecType = webrtc::kVideoCodecH264;

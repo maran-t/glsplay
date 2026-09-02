@@ -27,6 +27,14 @@ struct VideoConfig {
   // reordering costs a full 16-33ms of latency, which is most of the budget.
   int gop_length = -1;  // -1 selects infinite GOP with intra-refresh
 
+  // Upper bound written into the playout-delay RTP header extension, which the
+  // receiver is obliged to honour (unlike the client-side jitterBufferTarget
+  // hint, which Chrome overrode - it was observed holding 100-170ms). The
+  // minimum is always 0: render as soon as possible. Leaving a small window
+  // rather than pinning 0/0 lets Chrome still absorb genuine network jitter
+  // instead of juddering on every late packet.
+  int playout_delay_max_ms = 50;
+
   // Which DXGI adapter and output to duplicate. Defaults pick the first
   // NVIDIA adapter and its first attached output.
   int adapter_index = -1;

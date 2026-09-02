@@ -33,8 +33,9 @@ webrtc::SdpVideoFormat MakeH264Format() {
 
 }  // namespace
 
-NvencEncoderFactory::NvencEncoderFactory(Microsoft::WRL::ComPtr<ID3D11Device> device)
-    : device_(std::move(device)) {}
+NvencEncoderFactory::NvencEncoderFactory(Microsoft::WRL::ComPtr<ID3D11Device> device,
+                                         int playout_delay_max_ms)
+    : device_(std::move(device)), playout_delay_max_ms_(playout_delay_max_ms) {}
 
 NvencEncoderFactory::~NvencEncoderFactory() = default;
 
@@ -65,7 +66,7 @@ std::unique_ptr<webrtc::VideoEncoder> NvencEncoderFactory::Create(
                 "preferences may not have been applied";
   }
 
-  auto encoder = std::make_unique<NvencVideoEncoder>(device_);
+  auto encoder = std::make_unique<NvencVideoEncoder>(device_, playout_delay_max_ms_);
   active_ = encoder.get();
   LOG_INFO << "created NVENC encoder for " << format.ToString();
   return encoder;
