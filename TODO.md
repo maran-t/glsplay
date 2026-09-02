@@ -269,6 +269,20 @@ onto the captured display.
       glass-to-glass target has never been measured.** This is the point of the POC and
       should come before more feature work — it says where the remaining budget goes.
 
+      **Do it in three passes, cheapest first — no game licence needed for the first two:**
+      1. *Clean pipeline baseline.* A keypress-→-fullscreen-flash HTML page open on the
+         *host* desktop (not the browser client). Phone at 240 fps slow-mo framing the
+         keyboard and the client screen together; press key, count frames to the client
+         flash (1 frame = 4.17 ms). Isolates capture→encode→network→decode→display with
+         zero game and zero DRM.
+      2. *Under encoder load.* Same measurement with Unigine Superposition (free, no
+         account, no anti-cheat) running in its interactive camera mode, so NVENC is
+         working a real game-like frame. This is the realistic number.
+      3. *Real game.* A native DX/Vulkan title. Titles with kernel anti-cheat
+         (EAC/BattlEye/EA AC/Vanguard) or Denuvo will likely refuse to launch on a VM +
+         virtual display + injected input (see *Known constraints*), so treat that pass
+         as an anti-cheat compatibility check, not the latency number.
+
 - [ ] **Client latency-vs-budget HUD.** The host already reports every piece
       (`captureMs`, `encodeMs`, `inputQueueMs`) and the browser has RTT / jitter-buffer
       / decode from `getStats()`. Nothing assembles them into the PRD §5 breakdown so a

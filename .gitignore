@@ -24,3 +24,6 @@ host.log*
 reclaim-console.log
 vdd/nefcon.zip
 apps/web.zip
+
+# webrtc-internals debug dumps
+webrtc_internals_dump*
