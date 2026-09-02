@@ -147,18 +147,8 @@ void InputDispatcher::HandleMessage(const uint8_t* data, size_t size) {
   }
 }
 
-void InputDispatcher::SetPointerRelative(bool relative) {
-  if (injector_) injector_->SetPointerRelative(relative);
-}
-
 void InputDispatcher::ReleaseAll() {
-  if (injector_) {
-    injector_->ReleaseAll();
-    // Back to the mode a session opens in. A client that dropped while
-    // Pointer-Locked would otherwise leave the next one's desktop pointer
-    // unclamped until it happened to send its first set-pointer-mode.
-    injector_->SetPointerRelative(false);
-  }
+  if (injector_) injector_->ReleaseAll();
   if (gamepad_) gamepad_->ReleaseAll();
 }
 

@@ -576,16 +576,6 @@ void PeerSession::OnMessage(const webrtc::DataBuffer& buffer) {
   } else if (*type == "set-bitrate") {
     const auto kbps = json::GetInt(text, "bitrateKbps");
     if (kbps && *kbps > 0) LOG_INFO << "client requested " << *kbps << " kbps";
-  } else if (*type == "set-pointer-mode") {
-    // Sent on every Pointer Lock transition. Until this was handled the
-    // injector clamped mouselook to the captured monitor, so a sweep past the
-    // screen edge injected a zero delta and the camera stopped turning.
-    const auto mode = json::GetString(text, "mode");
-    if (mode && input_) {
-      const bool relative = (*mode == "relative");
-      input_->SetPointerRelative(relative);
-      LOG_DEBUG << "pointer mode: " << *mode;
-    }
   }
 }
 

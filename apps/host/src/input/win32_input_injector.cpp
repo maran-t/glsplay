@@ -90,10 +90,6 @@ void Win32InputInjector::SetCaptureBounds(int left, int top, int width, int heig
   bounds_height_.store(height, std::memory_order_relaxed);
 }
 
-void Win32InputInjector::SetPointerRelative(bool relative) {
-  pointer_relative_.store(relative, std::memory_order_relaxed);
-}
-
 void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   if (!mouse_enabled_) return;
   if (dx == 0 && dy == 0) return;
@@ -117,17 +113,9 @@ void Win32InputInjector::MouseMoveRelative(int16_t dx, int16_t dy) {
   const int width = bounds_width_.load(std::memory_order_relaxed);
   const int height = bounds_height_.load(std::memory_order_relaxed);
 
-  // No captured-monitor rect yet, or the client is in Pointer Lock: inject the
-  // delta verbatim. Under mouselook the OS cursor's position is irrelevant -
-  // the game reads deltas - and clamping it would silently zero the injected
-  // move the moment the cursor reached an edge, stopping the camera mid-sweep.
-  if (width <= 0 || height <= 0 ||
-      pointer_relative_.load(std::memory_order_relaxed)) {
+  // No captured-monitor rect yet: fall back to a plain verbatim relative move.
+  if (width <= 0 || height <= 0) {
     inject(dx, dy);
-    // The believed position is only meaningful for the clamped path, and it
-    // goes stale while we bypass it. Drop it so the absolute path re-anchors
-    // from GetCursorPos on the next move rather than trusting a stale value.
-    have_pos_ = false;
     return;
   }
 

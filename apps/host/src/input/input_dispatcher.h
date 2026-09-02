@@ -40,10 +40,6 @@ class InputDispatcher {
   // Lifts every held key, button and gamepad. Called on peer disconnect.
   void ReleaseAll();
 
-  // Mirrors the client's set-pointer-mode onto the injector; see
-  // Win32InputInjector::SetPointerRelative for why the two modes differ.
-  void SetPointerRelative(bool relative);
-
   InputStats stats() const;
 
   IGamepadSink* gamepad() const { return gamepad_.get(); }
