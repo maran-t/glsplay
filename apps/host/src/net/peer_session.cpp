@@ -393,7 +393,12 @@ void PeerSession::HandleSignalingMessage(const std::string& message) {
       // Lift any held input before tearing down, or a key held at the moment
       // the browser closed stays latched on the remote desktop.
       input_->ReleaseAll();
-      ClosePeer();
+      // mutex_ is already held here - ClosePeer() would re-lock it (non-
+      // recursive std::mutex -> UB, and in practice the host died right on
+      // this line). Use the already-locked body instead.
+      ClosePeerLocked();
+      // The process stays up; a later "client joined" / "registered" rebuilds
+      // the peer from scratch.
     }
     return;
   }
@@ -455,6 +460,10 @@ bool PeerSession::SendControl(const std::string& message) {
 
 void PeerSession::ClosePeer() {
   std::lock_guard<std::mutex> guard(mutex_);
+  ClosePeerLocked();
+}
+
+void PeerSession::ClosePeerLocked() {
   if (input_channel_) {
     input_channel_->UnregisterObserver();
     input_channel_->Close();

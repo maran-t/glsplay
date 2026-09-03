@@ -43,6 +43,7 @@ class PeerSession : public webrtc::PeerConnectionObserver,
   void HandleSignalingMessage(const std::string& json);
 
   // Tears down the current peer connection, e.g. when the client disconnects.
+  // Takes mutex_; do not call while it is already held - use ClosePeerLocked().
   void ClosePeer();
 
   // Sends a JSON control message over the reliable "control" channel.
@@ -66,6 +67,10 @@ class PeerSession : public webrtc::PeerConnectionObserver,
  private:
   bool CreatePeerConnection();
   void CreateOffer();
+  // Body of ClosePeer(). Assumes the caller already holds mutex_ - the
+  // signaling-message handler does when a "client left" arrives, and
+  // re-locking a non-recursive std::mutex from the same thread is UB.
+  void ClosePeerLocked();
   void HandleAnswer(const std::string& sdp);
   void HandleRemoteCandidate(const std::string& json);
   void SendHello();
