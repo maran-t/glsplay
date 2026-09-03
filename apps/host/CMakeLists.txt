@@ -149,23 +149,28 @@ target_link_libraries(glsplay-host PRIVATE
 
 if(GLSPLAY_ENABLE_VIGEM)
   set(VIGEM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ViGEmClient" CACHE PATH
-      "Root of the ViGEmClient SDK")
-  if(EXISTS "${VIGEM_ROOT}/include/ViGEm/Client.h")
-    target_include_directories(glsplay-host PRIVATE "${VIGEM_ROOT}/include")
+      "Root of the vendored ViGEmClient SDK (nefarius/ViGEmClient src/ + include/)")
+  if(EXISTS "${VIGEM_ROOT}/src/ViGEmClient.cpp")
+    # ViGEmClient is a single translation unit. Compile it straight into the
+    # host instead of linking a prebuilt .lib: it then picks up the same static
+    # CRT (/MT, see CMAKE_MSVC_RUNTIME_LIBRARY above) and flags as the rest of
+    # the target, so there is no runtime-library mismatch and no separate build
+    # step. Vendor it by downloading the repo ZIP and copying src/ and include/
+    # into third_party/ViGEmClient/ - see third_party/README.md.
+    target_sources(glsplay-host PRIVATE "${VIGEM_ROOT}/src/ViGEmClient.cpp")
+    target_include_directories(glsplay-host PRIVATE
+      "${VIGEM_ROOT}/include"   # <ViGEm/Client.h>
+      "${VIGEM_ROOT}/src")      # Internal.h, UniUtil.h, resource.h
     target_compile_definitions(glsplay-host PRIVATE GLSPLAY_HAVE_VIGEM=1)
-    find_library(VIGEM_LIBRARY
-      NAMES ViGEmClient
-      PATHS "${VIGEM_ROOT}/lib/release/x64" "${VIGEM_ROOT}/lib"
-      NO_DEFAULT_PATH)
-    if(VIGEM_LIBRARY)
-      target_link_libraries(glsplay-host PRIVATE "${VIGEM_LIBRARY}" setupapi)
-    else()
-      message(FATAL_ERROR "ViGEmClient headers found but the library was not. Set VIGEM_ROOT correctly or configure with -DGLSPLAY_ENABLE_VIGEM=OFF.")
-    endif()
+    # ViGEmClient.vcxproj builds Unicode; match it for this one file so the
+    # wide-string Setup API calls resolve the same way.
+    set_source_files_properties("${VIGEM_ROOT}/src/ViGEmClient.cpp"
+      PROPERTIES COMPILE_DEFINITIONS "UNICODE;_UNICODE")
+    target_link_libraries(glsplay-host PRIVATE setupapi)
   else()
     # Not an error: the host is fully usable for PRD phases 1-4 without a
     # gamepad, and NullGamepadSink covers the interface.
-    message(STATUS "ViGEmClient not found - building without gamepad support")
+    message(STATUS "ViGEmClient not vendored - building without gamepad support")
   endif()
 endif()
 

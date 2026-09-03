@@ -12,7 +12,6 @@ apps/host/out/
 # stay out of the repo. The NVENC headers (Interface/*.h) ARE committed - small, and
 # otherwise gated behind an NVIDIA developer login.
 apps/host/third_party/webrtc/
-apps/host/third_party/ViGEmClient/
 
 .env
 .env.local
