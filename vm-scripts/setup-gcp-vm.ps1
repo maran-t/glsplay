@@ -18,9 +18,10 @@
 
 [CmdletBinding()]
 param(
-  # Set these to enable auto-logon. Without it you must keep a console session
-  # alive manually, which does not survive a reboot.
-  [string]$AutoLogonUser,
+  # Auto-logon account. Defaults to the account running this script - it is not
+  # pinned to any particular name. Only the password has to be supplied (there
+  # is no way to derive it); pass -AutoLogonPassword to (re)configure auto-logon.
+  [string]$AutoLogonUser = $env:USERNAME,
   [string]$AutoLogonPassword,
 
   [switch]$SkipDriver
@@ -107,18 +108,26 @@ if (-not $endpoints) {
 
 Write-Step 'Console session'
 
-if ($AutoLogonUser -and $AutoLogonPassword) {
-  $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
-  Set-ItemProperty -Path $winlogon -Name 'AutoAdminLogon'  -Value '1' -Type String
-  Set-ItemProperty -Path $winlogon -Name 'DefaultUserName' -Value $AutoLogonUser -Type String
-  Set-ItemProperty -Path $winlogon -Name 'DefaultPassword' -Value $AutoLogonPassword -Type String
+$winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+$existing = Get-ItemProperty -Path $winlogon -ErrorAction SilentlyContinue
+
+if ($AutoLogonPassword) {
+  Set-ItemProperty -Path $winlogon -Name 'AutoAdminLogon'    -Value '1' -Type String
+  Set-ItemProperty -Path $winlogon -Name 'DefaultUserName'   -Value $AutoLogonUser -Type String
+  Set-ItemProperty -Path $winlogon -Name 'DefaultPassword'   -Value $AutoLogonPassword -Type String
+  # Local account -> stamp the machine name so the logon resolves without a
+  # domain and glsplay's Resolve-LogonUser can use the bare name.
+  Set-ItemProperty -Path $winlogon -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -Type String
   Write-Ok "auto-logon enabled for $AutoLogonUser"
   Write-Warn 'The password is stored in the registry in clear text. This is the'
   Write-Warn 'standard trade-off for headless capture; keep the VM firewalled.'
+} elseif ($existing.AutoAdminLogon -eq '1' -and $existing.DefaultUserName) {
+  Write-Ok "auto-logon already configured for $($existing.DefaultUserName) - left unchanged"
+  Write-Warn 'Pass -AutoLogonPassword (optionally with -AutoLogonUser) to change it.'
 } else {
-  Write-Warn 'Auto-logon not configured. Pass -AutoLogonUser and -AutoLogonPassword,'
-  Write-Warn 'or the console session will be empty after every reboot and the host'
-  Write-Warn 'will have no desktop to capture.'
+  Write-Warn "Auto-logon not configured. Re-run with -AutoLogonPassword (the user"
+  Write-Warn "defaults to the current account, '$AutoLogonUser'), or the console"
+  Write-Warn 'session will be empty after every reboot and the host has nothing to capture.'
 }
 
 # Never let the console lock or blank - a locked session shows the secure

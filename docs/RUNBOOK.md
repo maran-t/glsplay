@@ -62,7 +62,7 @@ RDP in, then run **as Administrator**:
 .\vm-scripts\setup-firewall.ps1
 
 # Driver, audio service, auto-logon, power settings
-.\vm-scripts\setup-gcp-vm.ps1 -AutoLogonUser <user> -AutoLogonPassword '<password>'
+.\vm-scripts\setup-gcp-vm.ps1 -AutoLogonPassword '<password>'   # -AutoLogonUser defaults to the current account
 
 # Virtual display - prints your options, then install with -DriverPath
 .\vm-scripts\install-virtual-display.ps1

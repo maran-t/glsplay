@@ -27,7 +27,7 @@ gcloud compute regions describe asia-south1 --format=json | Select-String -Patte
 gcloud compute reset-windows-password glsplay-host --zone asia-south1-c
 
 # 3. RDP in, copy this folder across, then as Administrator:
-.\setup-gcp-vm.ps1 -AutoLogonUser myuser -AutoLogonPassword 'the-password'
+.\setup-gcp-vm.ps1 -AutoLogonPassword 'the-password'   # -AutoLogonUser defaults to the current account
 .\install-virtual-display.ps1          # prints download options
 .\install-virtual-display.ps1 -DriverPath C:\drivers\parsec-vdd
 .\setup-firewall.ps1

@@ -233,8 +233,10 @@ four scheduled tasks. Set up in one shot:
 ```powershell
 # One-time base OS setup: autologon, disable lock screen / screensaver / sleep,
 # fSingleSessionPerUser=1  (repo script)
+# -AutoLogonUser defaults to the account you run this as; only the password is
+# required. Omit -AutoLogonPassword to leave an already-configured autologon alone.
 powershell -ExecutionPolicy Bypass -File C:\glsplay\vm-scripts\setup-gcp-vm.ps1 `
-  -AutoLogonUser maranmani_t99 -AutoLogonPassword '<windows-password>'
+  -AutoLogonPassword '<windows-password>'
 
 # Windows firewall for media + signaling (repo script)
 powershell -ExecutionPolicy Bypass -File C:\glsplay\vm-scripts\setup-firewall.ps1
@@ -253,12 +255,15 @@ powershell -ExecutionPolicy Bypass -File C:\glsplay\vdd\setup-headless.ps1
 |---|---|---|---|
 | ~~`glsplay-signaling`~~ | ~~At startup~~ | ~~SYSTEM~~ | **MOVED** — the registration loop is commented out in `setup-headless.ps1` (§3 of that script). Register from the separate web/signaling repo, pointed at its own checkout. |
 | ~~`glsplay-web`~~ | ~~At startup~~ | ~~SYSTEM~~ | **MOVED** — same as above. |
-| `glsplay-host` | *(none — on demand)* | `maranmani_t99` | `powershell -File C:\glsplay\run-host.ps1` |
+| `glsplay-host` | **AtLogon** (`maranmani_t99`), +15s delay, restart 3×/1min | `maranmani_t99` | `powershell -File C:\glsplay\run-host.ps1` |
 | `glsplay-reclaim` | **Session RemoteDisconnect** | SYSTEM | `powershell -File C:\glsplay\vdd\reclaim-console.ps1` |
 
 `setup-headless.ps1` now registers only `glsplay-host` and `glsplay-reclaim`.
 
-**Flow when you disconnect RDP:**
+**Reboot:** autologon puts `maranmani_t99` on the console → `glsplay-host` fires 15s
+later → host runs in the console session. Nothing else needed.
+
+**Flow when you disconnect RDP** (RDP-in had stolen the console session):
 
 ```
 RDP disconnect
@@ -268,17 +273,19 @@ RDP disconnect
                                      the L4 now exposes 2 DXGI outputs —
                                        output 0 = L4 phantom head, ~1280x800
                                        output 1 = Virtual Display Driver, 1920x1080)
-      → wait 4s → schtasks /run /tn glsplay-host
-  → glsplay-host (maranmani_t99, now in the console session)
-      → run-host.ps1:
-          → set-vdd-res.ps1  — best-effort pin of the VDD to 1920x1080@60.
-            May log "No MTT / Virtual Display device found" when it runs from a
-            non-interactive window station; harmless — vdd_settings.xml already
-            pins the VDD to 1920x1080@60.
-          → glsplay-host.exe --output 1   (capture the Virtual Display Driver;
-            run-host.ps1 -Output '' falls back to output 0 = the phantom)
+      → wait 4s → set-vdd-res.ps1 (re-pin the VDD to 1920x1080@60)
+      → if glsplay-host is NOT running: schtasks /run /tn glsplay-host
+        else: leave it — the capture loop retries Reinitialise() on ACCESS_LOST
+              and re-acquires DXGI on its own once the session is back on console
+  → glsplay-host (maranmani_t99)
+      → run-host.ps1 → set-vdd-res.ps1 → glsplay-host.exe --output 0
       → C:\glsplay\host.log  (+ .prev, .res)
 ```
+
+The host no longer exits when the browser disconnects (that was a `ClosePeer()`
+mutex double-lock bug — fixed), so in steady state the RDP in/out cycle needs no
+host restart at all; the `schtasks /run` above is just a safety net for a
+genuinely-down host.
 
 Logs: `C:\glsplay\reclaim-console.log`, `C:\glsplay\host.log` (+ `.prev`, `.res`).
 
@@ -381,8 +388,10 @@ Invoke-RestMethod http://localhost:8080/health          # {"peers":0,...}
 
 Then:
 
-1. **Disconnect RDP** (window ✕ — *not* Sign out). `glsplay-reclaim` fires → host starts.
-2. Laptop browser → `http://<STATIC_VM_IP>:3000` → **Ctrl+Shift+R** (fresh bundle) → **click the video** (starts playback + Pointer Lock; input only works after this gesture; **Esc** releases).
+1. **Disconnect RDP** (window ✕ — *not* Sign out). `glsplay-reclaim` fires → `tscon` the
+   session to the console → the running host re-acquires DXGI. (After a plain reboot the
+   host is already up from the AtLogon trigger and no RDP dance is needed.)
+2. Laptop browser → `http://<STATIC_VM_IP>:3000` → **Ctrl+Shift+R** (fresh bundle) → **click the video** (starts playback + Pointer Lock; input only works after this gesture; **Esc** releases). Closing the tab no longer kills the host — reopen and reconnect any time.
 3. To inspect: reconnect RDP (this *pauses* the stream — RDP re-steals the display), then:
    ```powershell
    Get-Content C:\glsplay\reclaim-console.log -Tail 6
@@ -591,8 +600,8 @@ they don't relaunch mid-build; re-enable after.
 ### Our scripts — `C:\glsplay\vdd\`
 | File | Purpose |
 |---|---|
-| `setup-headless.ps1` | **One-shot orchestration.** Machine secret + registers all 4 scheduled tasks + lock/power hardening + status. Self-elevates. |
-| `reclaim-console.ps1` | Runs as SYSTEM from `glsplay-reclaim`. `tscon` the user session → console, then `schtasks /run glsplay-host`. Log: `C:\glsplay\reclaim-console.log`. |
+| `setup-headless.ps1` | **One-shot orchestration.** Machine secret + registers the `glsplay-host` (AtLogon) and `glsplay-reclaim` (RDP-disconnect) tasks + lock/power hardening + status. Self-elevates. |
+| `reclaim-console.ps1` | Runs as SYSTEM from `glsplay-reclaim`. `tscon` the user session → console, re-pin the VDD via `set-vdd-res.ps1`, then `schtasks /run glsplay-host` **only if it isn't already running**. Log: `C:\glsplay\reclaim-console.log`. |
 | `set-vdd-res.ps1` | Sets the MTT display mode via `ChangeDisplaySettingsEx` P/Invoke. `-Width -Height -Hz`. Called by `run-host.ps1`. |
 | `silent-install.ps1` | From the VirtualDrivers repo — headless MTT install via NefCon. Kept for reference; we used the Device Manager wizard instead. |
 | `changeres-VDD.ps1` | From the VirtualDrivers repo — needs an extra PS module; unused. |
@@ -613,7 +622,8 @@ they don't relaunch mid-build; re-enable after.
 | `docs/RUNBOOK.md` | Original laptop↔VM control-plane bring-up (pre-headless-automation). Describes the broker + web client, which now live in the separate web/signaling repo. |
 
 ### Scheduled tasks (created by `setup-headless.ps1`)
-`glsplay-host` — on-demand, `maranmani_t99`.
+`glsplay-host` — **AtLogon** (`maranmani_t99`, +15s), restart 3×/1min. Also run on
+demand by `reclaim-console.ps1` when it's found dead.
 `glsplay-reclaim` — Session RemoteDisconnect, SYSTEM.
 `glsplay-signaling`, `glsplay-web` — **MOVED**: AtStartup/SYSTEM tasks, now
 registered from the separate web/signaling repo (the loop that created them in
